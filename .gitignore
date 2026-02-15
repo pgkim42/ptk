@@ -1,0 +1,10 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Rust / Tauri build outputs
+src-tauri/target/
+
+# Optional editor/OS noise
+.DS_Store
+Thumbs.db

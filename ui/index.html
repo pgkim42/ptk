@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dev Port Guard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Dev Port Guard</h1>
+      <p>에이전트가 남긴 개발 서버 포트를 감시하고 필요 시 종료하세요.</p>
+
+      <div class="controls">
+        <label for="host">Host</label>
+        <input id="host" type="text" value="127.0.0.1" />
+
+        <label for="ports">Ports</label>
+        <textarea id="ports" rows="4"></textarea>
+
+        <label for="timeout">Timeout(ms)</label>
+        <input id="timeout" type="number" min="50" value="300" />
+
+        <label for="autoMonitor">Auto monitor</label>
+        <div class="row-controls">
+          <input id="autoMonitor" type="checkbox" checked />
+          <span>3초 주기</span>
+          <button id="loadDefault" type="button">기본 포트 불러오기</button>
+          <button id="scan" type="button">지금 스캔</button>
+        </div>
+      </div>
+
+      <section>
+        <h2>결과</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Port</th>
+              <th>Status</th>
+              <th>PID</th>
+              <th>Process</th>
+              <th>Detail</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="results"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="./main.js"></script>
+  </body>
+</html>

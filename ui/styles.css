@@ -1,0 +1,99 @@
+:root {
+  font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+  color: #111;
+  background: #f4f6f8;
+}
+
+body {
+  margin: 0;
+}
+
+.container {
+  max-width: 900px;
+  margin: 24px auto;
+  padding: 20px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+h1,
+h2 {
+  margin-top: 0;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.controls textarea,
+.controls input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+}
+
+button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #0b66ff;
+  color: #fff;
+  cursor: pointer;
+}
+
+.row-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.kill-btn {
+  padding: 6px 10px;
+  background: #cc2f2f;
+}
+
+button:disabled {
+  background: #6a93d8;
+  cursor: not-allowed;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e2e2e2;
+  padding: 8px;
+  text-align: left;
+}
+
+.status-open {
+  color: #0b7d27;
+  font-weight: 600;
+}
+
+.status-closed {
+  color: #b11f1f;
+  font-weight: 600;
+}
+
+.state-changed {
+  background: #fff7dd;
+}
+
+@media (max-width: 640px) {
+  .controls {
+    grid-template-columns: 1fr;
+  }
+
+  button {
+    grid-column: 1;
+  }
+}
