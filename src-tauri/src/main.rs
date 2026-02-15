@@ -1,6 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use port_watch::portscan::{kill_pid, parse_ports_expr, scan_ports, PortStatus, DEFAULT_PORTS_EXPR, DEFAULT_PROFILE_NAME};
+use port_watch::portscan::{
+    kill_pid, parse_ports_expr_strict, scan_ports, KillMode, PortStatus, DEFAULT_PORTS_EXPR,
+    DEFAULT_PROFILE_NAME,
+};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -16,12 +19,16 @@ struct KillResult {
 }
 
 #[tauri::command]
-fn scan_ports_cmd(host: String, ports_expr: String, timeout_ms: u64) -> Result<Vec<PortStatus>, String> {
+fn scan_ports_cmd(
+    host: String,
+    ports_expr: String,
+    timeout_ms: u64,
+) -> Result<Vec<PortStatus>, String> {
     if host.trim().is_empty() {
         return Err("host is empty".to_string());
     }
 
-    let ports = parse_ports_expr(&ports_expr);
+    let ports = parse_ports_expr_strict(&ports_expr)?;
     if ports.is_empty() {
         return Ok(vec![]);
     }
@@ -31,7 +38,7 @@ fn scan_ports_cmd(host: String, ports_expr: String, timeout_ms: u64) -> Result<V
 
 #[tauri::command]
 fn kill_process_by_pid(pid: u32) -> KillResult {
-    match kill_pid(pid) {
+    match kill_pid(pid, KillMode::Soft) {
         Ok(message) => KillResult { ok: true, message },
         Err(message) => KillResult { ok: false, message },
     }
@@ -54,4 +61,16 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scan_ports_cmd;
+
+    #[test]
+    fn scan_ports_cmd_returns_error_on_invalid_ports() {
+        let result = scan_ports_cmd("127.0.0.1".to_string(), "8080, nope".to_string(), 300);
+        let err = result.unwrap_err();
+        assert!(err.contains("invalid ports:"));
+    }
 }

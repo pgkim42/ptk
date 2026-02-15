@@ -4,6 +4,8 @@ use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::process::Command;
 use std::time::Duration;
 
+pub const MAX_PORT_COUNT: usize = 5000;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PortStatus {
     pub port: u16,
@@ -13,11 +15,18 @@ pub struct PortStatus {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KillMode {
+    Soft,
+    Force,
+}
+
 pub const DEFAULT_PROFILE_NAME: &str = "framework-default";
 pub const DEFAULT_PORTS_EXPR: &str = "3000-3009,5173-5182,4200-4209,8080-8089";
 
-pub fn parse_ports_expr(input: &str) -> Vec<u16> {
+pub fn parse_ports_expr_strict(input: &str) -> Result<Vec<u16>, String> {
     let mut out = BTreeSet::new();
+    let mut invalid_tokens = Vec::new();
 
     for token in input
         .split(|c: char| c == ',' || c.is_ascii_whitespace())
@@ -27,24 +36,44 @@ pub fn parse_ports_expr(input: &str) -> Vec<u16> {
         if let Some((s, e)) = token.split_once('-') {
             let start = s.trim().parse::<u16>();
             let end = e.trim().parse::<u16>();
-            if let (Ok(start), Ok(end)) = (start, end) {
-                if start > 0 && start <= end {
+            match (start, end) {
+                (Ok(start), Ok(end)) if start > 0 && start <= end => {
                     for p in start..=end {
                         out.insert(p);
+                        if out.len() > MAX_PORT_COUNT {
+                            return Err(format!(
+                                "too many ports: {} (max {})",
+                                out.len(),
+                                MAX_PORT_COUNT
+                            ));
+                        }
                     }
                 }
+                _ => invalid_tokens.push(token.to_string()),
             }
             continue;
         }
 
-        if let Ok(port) = token.parse::<u16>() {
-            if port > 0 {
+        match token.parse::<u16>() {
+            Ok(port) if port > 0 => {
                 out.insert(port);
+                if out.len() > MAX_PORT_COUNT {
+                    return Err(format!(
+                        "too many ports: {} (max {})",
+                        out.len(),
+                        MAX_PORT_COUNT
+                    ));
+                }
             }
+            _ => invalid_tokens.push(token.to_string()),
         }
     }
 
-    out.into_iter().collect()
+    if !invalid_tokens.is_empty() {
+        return Err(format!("invalid ports: {}", invalid_tokens.join(", ")));
+    }
+
+    Ok(out.into_iter().collect())
 }
 
 pub fn scan_ports(host: &str, ports: &[u16], timeout_ms: u64) -> Vec<PortStatus> {
@@ -97,20 +126,31 @@ pub fn scan_ports(host: &str, ports: &[u16], timeout_ms: u64) -> Vec<PortStatus>
     out
 }
 
-pub fn kill_pid(pid: u32) -> Result<String, String> {
+pub fn kill_pid(pid: u32, mode: KillMode) -> Result<String, String> {
     if pid == 0 {
         return Err("invalid pid".to_string());
     }
 
     #[cfg(target_os = "windows")]
     {
+        let pid_text = pid.to_string();
+        let mut args = vec!["/PID", pid_text.as_str()];
+        if mode == KillMode::Force {
+            args.push("/F");
+        }
+
         let output = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F"])
+            .args(args)
             .output()
             .map_err(|e| format!("failed to execute taskkill: {}", e))?;
 
         if output.status.success() {
-            return Ok(format!("killed pid {}", pid));
+            let label = if mode == KillMode::Force {
+                "force-killed"
+            } else {
+                "killed"
+            };
+            return Ok(format!("{} pid {}", label, pid));
         }
 
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -119,13 +159,23 @@ pub fn kill_pid(pid: u32) -> Result<String, String> {
 
     #[cfg(not(target_os = "windows"))]
     {
+        let signal = if mode == KillMode::Force {
+            "-KILL"
+        } else {
+            "-TERM"
+        };
         let output = Command::new("kill")
-            .args(["-9", &pid.to_string()])
+            .args([signal, &pid.to_string()])
             .output()
             .map_err(|e| format!("failed to execute kill: {}", e))?;
 
         if output.status.success() {
-            return Ok(format!("killed pid {}", pid));
+            let label = if mode == KillMode::Force {
+                "force-killed"
+            } else {
+                "killed"
+            };
+            return Ok(format!("{} pid {}", label, pid));
         }
 
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -154,25 +204,8 @@ fn port_pid_map() -> Result<HashMap<u16, u32>, String> {
         return Err(format!("netstat failed: {}", stderr.trim()));
     }
 
-    let mut out = HashMap::new();
     let stdout = String::from_utf8_lossy(&output.stdout);
-
-    for line in stdout.lines() {
-        let cols: Vec<&str> = line.split_whitespace().collect();
-        if cols.len() < 5 {
-            continue;
-        }
-        let local = cols[1];
-        let pid = cols[4].parse::<u32>().ok();
-        let port = parse_port_from_addr(local);
-        if let (Some(port), Some(pid)) = (port, pid) {
-            if pid > 0 {
-                out.insert(port, pid);
-            }
-        }
-    }
-
-    Ok(out)
+    Ok(parse_windows_netstat_listening_pid_map(&stdout))
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -202,12 +235,41 @@ fn port_pid_map() -> Result<HashMap<u16, u32>, String> {
         let pid = parse_pid_from_ss_process(&proc_col);
         if let (Some(port), Some(pid)) = (port, pid) {
             if pid > 0 {
-                out.insert(port, pid);
+                out.entry(port).or_insert(pid);
             }
         }
     }
 
     Ok(out)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn parse_windows_netstat_listening_pid_map(stdout: &str) -> HashMap<u16, u32> {
+    let mut out = HashMap::new();
+
+    for line in stdout.lines() {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        // Proto Local Address Foreign Address State PID
+        if cols.len() < 5 {
+            continue;
+        }
+
+        let state = cols[3];
+        if !state.eq_ignore_ascii_case("LISTENING") {
+            continue;
+        }
+
+        let local = cols[1];
+        let pid = cols[4].parse::<u32>().ok();
+        let port = parse_port_from_addr(local);
+        if let (Some(port), Some(pid)) = (port, pid) {
+            if pid > 0 {
+                out.entry(port).or_insert(pid);
+            }
+        }
+    }
+
+    out
 }
 
 fn parse_port_from_addr(addr: &str) -> Option<u16> {
@@ -280,12 +342,44 @@ fn process_name_by_pid(pid: u32) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_pid_from_ss_process, parse_port_from_addr, parse_ports_expr};
+    use super::{
+        parse_pid_from_ss_process, parse_port_from_addr, parse_ports_expr_strict,
+        parse_windows_netstat_listening_pid_map, MAX_PORT_COUNT,
+    };
 
     #[test]
     fn parse_ports_expr_handles_list_and_range() {
-        let got = parse_ports_expr("8080, 3000-3002, 8080, nope, 0");
+        let got = parse_ports_expr_strict("8080, 3000-3002, 8080").unwrap();
         assert_eq!(got, vec![3000, 3001, 3002, 8080]);
+    }
+
+    #[test]
+    fn parse_ports_expr_returns_invalid_tokens() {
+        let err = parse_ports_expr_strict("8080, nope, 3000-2x").unwrap_err();
+        assert!(err.contains("invalid ports:"));
+        assert!(err.contains("nope"));
+        assert!(err.contains("3000-2x"));
+    }
+
+    #[test]
+    fn parse_ports_expr_enforces_max_port_count() {
+        let expr = format!("1-{}", MAX_PORT_COUNT + 1);
+        let err = parse_ports_expr_strict(&expr).unwrap_err();
+        assert!(err.contains("too many ports"));
+    }
+
+    #[test]
+    fn parse_windows_netstat_uses_listening_only_and_first_pid() {
+        let sample = "\
+  Proto  Local Address          Foreign Address        State           PID\n\
+  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       111\n\
+  TCP    127.0.0.1:3000         127.0.0.1:54000        ESTABLISHED     222\n\
+  TCP    [::]:8080              [::]:0                 LISTENING       333\n\
+  TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       444\n";
+
+        let map = parse_windows_netstat_listening_pid_map(sample);
+        assert_eq!(map.get(&3000), Some(&111));
+        assert_eq!(map.get(&8080), Some(&333));
     }
 
     #[test]

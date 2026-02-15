@@ -3,7 +3,9 @@ use comfy_table::{
     modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement,
     Table,
 };
-use port_watch::portscan::{kill_pid, parse_ports_expr, scan_ports, DEFAULT_PORTS_EXPR};
+use port_watch::portscan::{
+    kill_pid, parse_ports_expr_strict, scan_ports, KillMode, PortStatus, DEFAULT_PORTS_EXPR,
+};
 use std::thread;
 use std::time::Duration;
 
@@ -51,6 +53,8 @@ enum Commands {
         #[arg(long)]
         pid: u32,
         #[arg(long, default_value_t = false)]
+        force: bool,
+        #[arg(long, default_value_t = false)]
         yes: bool,
     },
 }
@@ -85,12 +89,17 @@ fn main() {
                 thread::sleep(Duration::from_secs(interval.max(1)));
             }
         }
-        Commands::Kill { pid, yes } => {
+        Commands::Kill { pid, force, yes } => {
             if !yes {
                 eprintln!("refusing to kill without --yes (pid={})", pid);
                 std::process::exit(2);
             }
-            match kill_pid(pid) {
+            let mode = if force {
+                KillMode::Force
+            } else {
+                KillMode::Soft
+            };
+            match kill_pid(pid, mode) {
                 Ok(msg) => println!("{}", msg),
                 Err(err) => {
                     eprintln!("{}", err);
@@ -113,11 +122,14 @@ fn resolve_ports_expr(ports: Option<String>, use_default: bool) -> String {
 }
 
 fn run_scan_once(host: &str, ports_expr: &str, timeout: u64, json: bool, open_only: bool) {
-    let ports = parse_ports_expr(ports_expr);
-    let mut rows = scan_ports(host, &ports, timeout);
-    if open_only {
-        rows.retain(|row| row.open);
-    }
+    let ports = match parse_ports_expr_strict(ports_expr) {
+        Ok(ports) => ports,
+        Err(err) => {
+            eprintln!("{}", err);
+            std::process::exit(2);
+        }
+    };
+    let rows = filter_rows(scan_ports(host, &ports, timeout), open_only);
 
     if json {
         match serde_json::to_string_pretty(&rows) {
@@ -148,7 +160,9 @@ fn run_scan_once(host: &str, ports_expr: &str, timeout: u64, json: bool, open_on
 
     for row in rows {
         let state = if row.open {
-            Cell::new("OPEN").fg(Color::Green).add_attribute(Attribute::Bold)
+            Cell::new("OPEN")
+                .fg(Color::Green)
+                .add_attribute(Attribute::Bold)
         } else {
             Cell::new("CLOSED").fg(Color::Red)
         };
@@ -156,7 +170,11 @@ fn run_scan_once(host: &str, ports_expr: &str, timeout: u64, json: bool, open_on
         table.add_row(vec![
             Cell::new(row.port),
             state,
-            Cell::new(row.pid.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string())),
+            Cell::new(
+                row.pid
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+            ),
             Cell::new(row.process_name.unwrap_or_else(|| "-".to_string())),
             Cell::new(short_detail(&localize_detail(&row.message))),
         ]);
@@ -184,7 +202,10 @@ fn localize_detail(message: &str) -> String {
     if lower.contains("connection succeeded") {
         return "연결 성공".to_string();
     }
-    if lower.contains("connection refused") {
+    if lower.contains("connection refused")
+        || lower.contains("actively refused")
+        || lower.contains("os error 111")
+    {
         return "연결 거부됨".to_string();
     }
     if lower.contains("timed out") {
@@ -204,4 +225,46 @@ fn localize_detail(message: &str) -> String {
     }
 
     message.to_string()
+}
+
+fn filter_rows(mut rows: Vec<PortStatus>, open_only: bool) -> Vec<PortStatus> {
+    if open_only {
+        rows.retain(|row| row.open);
+    }
+    rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{filter_rows, localize_detail};
+    use port_watch::portscan::PortStatus;
+
+    fn row(port: u16, open: bool) -> PortStatus {
+        PortStatus {
+            port,
+            open,
+            pid: None,
+            process_name: None,
+            message: String::new(),
+        }
+    }
+
+    #[test]
+    fn localize_detail_maps_common_messages() {
+        assert_eq!(
+            localize_detail("Connection refused (os error 111)"),
+            "연결 거부됨"
+        );
+        assert_eq!(localize_detail("Connection timed out"), "연결 시간 초과");
+        assert_eq!(localize_detail("invalid address: x"), "잘못된 주소 형식");
+    }
+
+    #[test]
+    fn filter_rows_applies_open_only() {
+        let rows = vec![row(3000, true), row(3001, false)];
+        assert_eq!(filter_rows(rows.clone(), false).len(), 2);
+        let filtered = filter_rows(rows, true);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].port, 3000);
+    }
 }
