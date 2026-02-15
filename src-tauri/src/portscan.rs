@@ -21,6 +21,67 @@ pub enum KillMode {
     Force,
 }
 
+#[derive(Debug, Clone)]
+pub struct KillRequest {
+    pub pid: u32,
+    pub mode: KillMode,
+    pub expected_process_name: Option<String>,
+    pub allow_mismatch: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KillResultKind {
+    Killed,
+    KilledWithWarning(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KillError {
+    InvalidPid,
+    LookupFailed {
+        pid: u32,
+    },
+    GuardMismatch {
+        expected: String,
+        actual: Option<String>,
+    },
+    CommandFailed(String),
+}
+
+impl KillError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            KillError::InvalidPid => "INVALID_PID",
+            KillError::LookupFailed { .. } => "BLOCKED_LOOKUP",
+            KillError::GuardMismatch { .. } => "BLOCKED_MISMATCH",
+            KillError::CommandFailed(_) => "COMMAND_FAILED",
+        }
+    }
+
+    pub fn message(&self) -> String {
+        match self {
+            KillError::InvalidPid => "잘못된 PID입니다.".to_string(),
+            KillError::LookupFailed { pid } => {
+                format!(
+                    "PID {} 프로세스 정보를 조회하지 못해 종료를 차단했습니다.",
+                    pid
+                )
+            }
+            KillError::GuardMismatch { expected, actual } => match actual {
+                Some(actual) => format!(
+                    "프로세스 정보 불일치로 종료를 차단했습니다. expected='{}', actual='{}'",
+                    expected, actual
+                ),
+                None => format!(
+                    "프로세스 정보 불일치로 종료를 차단했습니다. expected='{}'",
+                    expected
+                ),
+            },
+            KillError::CommandFailed(detail) => detail.clone(),
+        }
+    }
+}
+
 pub const DEFAULT_PROFILE_NAME: &str = "framework-default";
 pub const DEFAULT_PORTS_EXPR: &str = "3000-3009,5173-5182,4200-4209,8080-8089";
 
@@ -126,11 +187,82 @@ pub fn scan_ports(host: &str, ports: &[u16], timeout_ms: u64) -> Vec<PortStatus>
     out
 }
 
-pub fn kill_pid(pid: u32, mode: KillMode) -> Result<String, String> {
+pub fn kill_pid_checked(request: KillRequest) -> Result<KillResultKind, KillError> {
+    let KillRequest {
+        pid,
+        mode,
+        expected_process_name,
+        allow_mismatch,
+    } = request;
+
     if pid == 0 {
-        return Err("invalid pid".to_string());
+        return Err(KillError::InvalidPid);
     }
 
+    let expected = expected_process_name.and_then(|v| normalize_non_empty_name(&v));
+    let warning = if let Some(expected_name) = expected {
+        let actual = process_name_by_pid(pid);
+        evaluate_kill_guard(pid, &expected_name, actual, allow_mismatch)?
+    } else {
+        None
+    };
+
+    execute_kill(pid, mode).map_err(KillError::CommandFailed)?;
+
+    if let Some(warning) = warning {
+        Ok(KillResultKind::KilledWithWarning(warning))
+    } else {
+        Ok(KillResultKind::Killed)
+    }
+}
+
+pub fn kill_pid(pid: u32, mode: KillMode) -> Result<String, String> {
+    match kill_pid_checked(KillRequest {
+        pid,
+        mode,
+        expected_process_name: None,
+        allow_mismatch: false,
+    }) {
+        Ok(_) => Ok(format!("{} pid {}", success_label(mode), pid)),
+        Err(err) => Err(err.message()),
+    }
+}
+
+fn evaluate_kill_guard(
+    pid: u32,
+    expected: &str,
+    actual: Option<String>,
+    allow_mismatch: bool,
+) -> Result<Option<String>, KillError> {
+    match actual {
+        Some(actual_name) if names_match(expected, &actual_name) => Ok(None),
+        Some(actual_name) => {
+            if allow_mismatch {
+                Ok(Some(format!(
+                    "프로세스명 불일치 상태로 강행합니다. expected='{}', actual='{}'",
+                    expected, actual_name
+                )))
+            } else {
+                Err(KillError::GuardMismatch {
+                    expected: expected.to_string(),
+                    actual: Some(actual_name),
+                })
+            }
+        }
+        None => {
+            if allow_mismatch {
+                Ok(Some(format!(
+                    "PID {} 프로세스명 조회 실패 상태로 강행합니다.",
+                    pid
+                )))
+            } else {
+                Err(KillError::LookupFailed { pid })
+            }
+        }
+    }
+}
+
+fn execute_kill(pid: u32, mode: KillMode) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let pid_text = pid.to_string();
@@ -145,12 +277,7 @@ pub fn kill_pid(pid: u32, mode: KillMode) -> Result<String, String> {
             .map_err(|e| format!("failed to execute taskkill: {}", e))?;
 
         if output.status.success() {
-            let label = if mode == KillMode::Force {
-                "force-killed"
-            } else {
-                "killed"
-            };
-            return Ok(format!("{} pid {}", label, pid));
+            return Ok(());
         }
 
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -170,17 +297,33 @@ pub fn kill_pid(pid: u32, mode: KillMode) -> Result<String, String> {
             .map_err(|e| format!("failed to execute kill: {}", e))?;
 
         if output.status.success() {
-            let label = if mode == KillMode::Force {
-                "force-killed"
-            } else {
-                "killed"
-            };
-            return Ok(format!("{} pid {}", label, pid));
+            return Ok(());
         }
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         Err(format!("kill failed: {}", stderr.trim()))
     }
+}
+
+fn success_label(mode: KillMode) -> &'static str {
+    if mode == KillMode::Force {
+        "force-killed"
+    } else {
+        "killed"
+    }
+}
+
+fn normalize_non_empty_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn names_match(expected: &str, actual: &str) -> bool {
+    expected.trim().eq_ignore_ascii_case(actual.trim())
 }
 
 fn resolve_first(addr: &str) -> Option<SocketAddr> {
@@ -343,8 +486,9 @@ fn process_name_by_pid(pid: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_pid_from_ss_process, parse_port_from_addr, parse_ports_expr_strict,
-        parse_windows_netstat_listening_pid_map, MAX_PORT_COUNT,
+        evaluate_kill_guard, names_match, parse_pid_from_ss_process, parse_port_from_addr,
+        parse_ports_expr_strict, parse_windows_netstat_listening_pid_map, KillError,
+        MAX_PORT_COUNT,
     };
 
     #[test]
@@ -394,5 +538,48 @@ mod tests {
     fn parse_pid_from_ss_process_works() {
         let input = r#"users:((\"node\",pid=12345,fd=23))"#;
         assert_eq!(parse_pid_from_ss_process(input), Some(12345));
+    }
+
+    #[test]
+    fn names_match_is_trimmed_and_case_insensitive() {
+        assert!(names_match(" Node ", "node"));
+        assert!(names_match("Vite", "vite"));
+        assert!(!names_match("node", "java"));
+    }
+
+    #[test]
+    fn evaluate_kill_guard_blocks_mismatch_without_override() {
+        let result = evaluate_kill_guard(123, "node", Some("java".to_string()), false);
+        assert_eq!(
+            result.unwrap_err(),
+            KillError::GuardMismatch {
+                expected: "node".to_string(),
+                actual: Some("java".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn evaluate_kill_guard_returns_warning_when_mismatch_override_enabled() {
+        let warning = evaluate_kill_guard(123, "node", Some("java".to_string()), true)
+            .unwrap()
+            .unwrap();
+        assert!(warning.contains("강행"));
+        assert!(warning.contains("expected='node'"));
+    }
+
+    #[test]
+    fn evaluate_kill_guard_blocks_lookup_failure_without_override() {
+        let result = evaluate_kill_guard(9876, "node", None, false);
+        assert_eq!(result.unwrap_err(), KillError::LookupFailed { pid: 9876 });
+    }
+
+    #[test]
+    fn evaluate_kill_guard_allows_lookup_failure_with_override() {
+        let warning = evaluate_kill_guard(9876, "node", None, true)
+            .unwrap()
+            .unwrap();
+        assert!(warning.contains("조회 실패"));
+        assert!(warning.contains("9876"));
     }
 }

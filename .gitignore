@@ -8,3 +8,6 @@ src-tauri/target/
 # Optional editor/OS noise
 .DS_Store
 Thumbs.db
+
+# Codex plugin state
+.omx/

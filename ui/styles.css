@@ -88,6 +88,11 @@ td {
   background: #fff7dd;
 }
 
+.blocked-cell {
+  color: #a87000;
+  font-weight: 600;
+}
+
 @media (max-width: 640px) {
   .controls {
     grid-template-columns: 1fr;

@@ -4,7 +4,8 @@ use comfy_table::{
     Table,
 };
 use port_watch::portscan::{
-    kill_pid, parse_ports_expr_strict, scan_ports, KillMode, PortStatus, DEFAULT_PORTS_EXPR,
+    kill_pid_checked, parse_ports_expr_strict, scan_ports, KillError, KillMode, KillRequest,
+    KillResultKind, PortStatus, DEFAULT_PORTS_EXPR,
 };
 use std::thread;
 use std::time::Duration;
@@ -56,6 +57,10 @@ enum Commands {
         force: bool,
         #[arg(long, default_value_t = false)]
         yes: bool,
+        #[arg(long)]
+        expect_name: Option<String>,
+        #[arg(long, default_value_t = false)]
+        allow_mismatch: bool,
     },
 }
 
@@ -89,7 +94,13 @@ fn main() {
                 thread::sleep(Duration::from_secs(interval.max(1)));
             }
         }
-        Commands::Kill { pid, force, yes } => {
+        Commands::Kill {
+            pid,
+            force,
+            yes,
+            expect_name,
+            allow_mismatch,
+        } => {
             if !yes {
                 eprintln!("refusing to kill without --yes (pid={})", pid);
                 std::process::exit(2);
@@ -99,14 +110,56 @@ fn main() {
             } else {
                 KillMode::Soft
             };
-            match kill_pid(pid, mode) {
-                Ok(msg) => println!("{}", msg),
+            let normalized_expect_name = expect_name.and_then(|v| normalize_non_empty_name(v));
+            if normalized_expect_name.is_none() {
+                eprintln!(
+                    "warning: 안전검증(--expect-name)이 비활성화되어 PID 단독 종료를 수행합니다."
+                );
+            }
+
+            match kill_pid_checked(KillRequest {
+                pid,
+                mode,
+                expected_process_name: normalized_expect_name,
+                allow_mismatch,
+            }) {
+                Ok(result) => {
+                    if let KillResultKind::KilledWithWarning(warning) = &result {
+                        eprintln!("warning: {}", warning);
+                    }
+                    println!("{} pid {}", kill_label(mode), pid);
+                }
                 Err(err) => {
-                    eprintln!("{}", err);
-                    std::process::exit(1);
+                    eprintln!("{}", err.message());
+                    std::process::exit(kill_exit_code(&err));
                 }
             }
         }
+    }
+}
+
+fn normalize_non_empty_name(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn kill_label(mode: KillMode) -> &'static str {
+    if mode == KillMode::Force {
+        "force-killed"
+    } else {
+        "killed"
+    }
+}
+
+fn kill_exit_code(error: &KillError) -> i32 {
+    match error {
+        KillError::CommandFailed(_) => 1,
+        KillError::InvalidPid => 2,
+        KillError::LookupFailed { .. } | KillError::GuardMismatch { .. } => 3,
     }
 }
 
@@ -236,8 +289,8 @@ fn filter_rows(mut rows: Vec<PortStatus>, open_only: bool) -> Vec<PortStatus> {
 
 #[cfg(test)]
 mod tests {
-    use super::{filter_rows, localize_detail};
-    use port_watch::portscan::PortStatus;
+    use super::{filter_rows, kill_exit_code, localize_detail, normalize_non_empty_name};
+    use port_watch::portscan::{KillError, PortStatus};
 
     fn row(port: u16, open: bool) -> PortStatus {
         PortStatus {
@@ -266,5 +319,31 @@ mod tests {
         let filtered = filter_rows(rows, true);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].port, 3000);
+    }
+
+    #[test]
+    fn normalize_non_empty_name_trims_and_drops_empty() {
+        assert_eq!(
+            normalize_non_empty_name("  node  ".to_string()),
+            Some("node".to_string())
+        );
+        assert_eq!(normalize_non_empty_name("   ".to_string()), None);
+    }
+
+    #[test]
+    fn kill_exit_code_matches_contract() {
+        assert_eq!(kill_exit_code(&KillError::InvalidPid), 2);
+        assert_eq!(kill_exit_code(&KillError::LookupFailed { pid: 123 }), 3);
+        assert_eq!(
+            kill_exit_code(&KillError::GuardMismatch {
+                expected: "node".to_string(),
+                actual: Some("java".to_string()),
+            }),
+            3
+        );
+        assert_eq!(
+            kill_exit_code(&KillError::CommandFailed("boom".to_string())),
+            1
+        );
     }
 }

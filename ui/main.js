@@ -3,6 +3,7 @@ const portsEl = document.getElementById("ports");
 const timeoutEl = document.getElementById("timeout");
 const autoMonitorEl = document.getElementById("autoMonitor");
 const openOnlyEl = document.getElementById("openOnly");
+const killAllowMismatchEl = document.getElementById("killAllowMismatch");
 const loadDefaultBtn = document.getElementById("loadDefault");
 const scanBtn = document.getElementById("scan");
 const resultsEl = document.getElementById("results");
@@ -13,6 +14,10 @@ let timerId = null;
 let isScanning = false;
 const previousState = new Map();
 let lastRows = [];
+
+function hasProcessName(row) {
+  return typeof row.process_name === "string" && row.process_name.trim().length > 0;
+}
 
 function renderRows(rows) {
   resultsEl.innerHTML = "";
@@ -45,19 +50,41 @@ function renderRows(rows) {
 
     const actionTd = tr.lastElementChild;
     if (row.open && row.pid) {
+      const allowMismatch = Boolean(killAllowMismatchEl?.checked);
+      const safeNameAvailable = hasProcessName(row);
+      if (!safeNameAvailable && !allowMismatch) {
+        actionTd.textContent = "차단됨";
+        actionTd.classList.add("blocked-cell");
+        actionTd.title = "프로세스명을 확인하지 못해 기본 정책상 종료를 차단했습니다.";
+        resultsEl.appendChild(tr);
+        return;
+      }
+
       const btn = document.createElement("button");
       btn.className = "kill-btn";
       btn.type = "button";
-      btn.textContent = "종료";
+      btn.textContent = safeNameAvailable ? "종료" : "강행 종료";
       btn.addEventListener("click", async () => {
-        const ok = window.confirm(`PID ${row.pid} (${row.process_name ?? "unknown"}) 프로세스를 종료할까요?`);
+        const expectedProcessName = safeNameAvailable ? row.process_name.trim() : null;
+        const warningText = safeNameAvailable
+          ? ""
+          : "\n프로세스명을 확인하지 못해 강행 종료를 시도합니다.";
+        const ok = window.confirm(
+          `PID ${row.pid} (${row.process_name ?? "unknown"}) 프로세스를 종료할까요?${warningText}`,
+        );
         if (!ok) {
           return;
         }
 
-        const kill = await invoke("kill_process_by_pid", { pid: row.pid });
+        const kill = await invoke("kill_process_by_pid", {
+          pid: row.pid,
+          expectedProcessName,
+          allowMismatch: allowMismatch || !safeNameAvailable,
+        });
         if (!kill.ok) {
-          window.alert(`종료 실패: ${kill.message}`);
+          window.alert(`종료 실패 [${kill.code}]: ${kill.message}`);
+        } else if (kill.code === "KILLED_WITH_WARNING") {
+          window.alert(`주의: ${kill.message}`);
         }
         await runScanOnce();
       });
@@ -165,6 +192,7 @@ loadDefaultBtn.addEventListener("click", async () => {
 });
 autoMonitorEl.addEventListener("change", applyMonitorState);
 openOnlyEl.addEventListener("change", renderCurrentRows);
+killAllowMismatchEl?.addEventListener("change", renderCurrentRows);
 
 (async function init() {
   await loadDefaultProfile();
