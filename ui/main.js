@@ -2,6 +2,7 @@ const hostEl = document.getElementById("host");
 const portsEl = document.getElementById("ports");
 const timeoutEl = document.getElementById("timeout");
 const autoMonitorEl = document.getElementById("autoMonitor");
+const openOnlyEl = document.getElementById("openOnly");
 const loadDefaultBtn = document.getElementById("loadDefault");
 const scanBtn = document.getElementById("scan");
 const resultsEl = document.getElementById("results");
@@ -11,6 +12,7 @@ const INTERVAL_MS = 3000;
 let timerId = null;
 let isScanning = false;
 const previousState = new Map();
+let lastRows = [];
 
 function renderRows(rows) {
   resultsEl.innerHTML = "";
@@ -80,6 +82,17 @@ function renderError(message) {
   ]);
 }
 
+function currentVisibleRows() {
+  if (openOnlyEl?.checked) {
+    return lastRows.filter((row) => row.open);
+  }
+  return lastRows;
+}
+
+function renderCurrentRows() {
+  renderRows(currentVisibleRows());
+}
+
 async function runScanOnce() {
   if (!invoke) {
     renderError("Tauri runtime not found");
@@ -95,7 +108,8 @@ async function runScanOnce() {
   const timeoutMs = Number(timeoutEl.value);
 
   if (!portsExpr) {
-    renderRows([]);
+    lastRows = [];
+    renderCurrentRows();
     return;
   }
 
@@ -108,7 +122,8 @@ async function runScanOnce() {
       portsExpr,
       timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 300,
     });
-    renderRows(rows);
+    lastRows = rows;
+    renderCurrentRows();
   } catch (err) {
     renderError(`오류: ${String(err)}`);
   } finally {
@@ -149,6 +164,7 @@ loadDefaultBtn.addEventListener("click", async () => {
   await runScanOnce();
 });
 autoMonitorEl.addEventListener("change", applyMonitorState);
+openOnlyEl.addEventListener("change", renderCurrentRows);
 
 (async function init() {
   await loadDefaultProfile();

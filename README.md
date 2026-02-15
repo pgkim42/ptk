@@ -16,12 +16,16 @@
 - GUI(Tauri)
   - 기본 포트 자동 로드
   - 3초 주기 자동 감시(기본 ON)
+  - 열린 포트만 표시(기본 ON, 토글 가능)
   - 수동 즉시 스캔
   - 포트별 PID/프로세스명 표시
   - 확인 다이얼로그 후 프로세스 종료
 - CLI
   - `scan`: 1회 조회
   - `watch`: 반복 감시
+  - `--open-only`: 열린 포트만 출력
+  - 테이블 형태 출력 + `OPEN/CLOSED` 색상 표시
+  - `DETAIL` 메시지 한국어 표시(예: `연결 거부됨`)
   - `kill`: PID 종료
 
 ## 개발 실행
@@ -41,7 +45,9 @@ npm run tauri dev
 cd src-tauri
 cargo run --bin port-watch-cli -- scan --use-default
 cargo run --bin port-watch-cli -- watch --use-default --interval 3
+cargo run --bin port-watch-cli -- watch --use-default --interval 3 --open-only
 cargo run --bin port-watch-cli -- scan --ports "3000-3009,8080-8089" --json
+cargo run --bin port-watch-cli -- scan --use-default --open-only --json
 cargo run --bin port-watch-cli -- kill --pid 12345 --yes
 ```
 

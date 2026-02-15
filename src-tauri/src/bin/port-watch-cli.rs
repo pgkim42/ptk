@@ -1,4 +1,8 @@
 use clap::{Parser, Subcommand};
+use comfy_table::{
+    modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement,
+    Table,
+};
 use port_watch::portscan::{kill_pid, parse_ports_expr, scan_ports, DEFAULT_PORTS_EXPR};
 use std::thread;
 use std::time::Duration;
@@ -23,6 +27,8 @@ enum Commands {
         #[arg(long)]
         json: bool,
         #[arg(long, default_value_t = false)]
+        open_only: bool,
+        #[arg(long, default_value_t = false)]
         use_default: bool,
     },
     Watch {
@@ -36,6 +42,8 @@ enum Commands {
         interval: u64,
         #[arg(long)]
         json: bool,
+        #[arg(long, default_value_t = false)]
+        open_only: bool,
         #[arg(long, default_value_t = true)]
         use_default: bool,
     },
@@ -56,10 +64,11 @@ fn main() {
             ports,
             timeout,
             json,
+            open_only,
             use_default,
         } => {
             let expr = resolve_ports_expr(ports, use_default);
-            run_scan_once(&host, &expr, timeout, json);
+            run_scan_once(&host, &expr, timeout, json, open_only);
         }
         Commands::Watch {
             host,
@@ -67,11 +76,12 @@ fn main() {
             timeout,
             interval,
             json,
+            open_only,
             use_default,
         } => {
             let expr = resolve_ports_expr(ports, use_default);
             loop {
-                run_scan_once(&host, &expr, timeout, json);
+                run_scan_once(&host, &expr, timeout, json, open_only);
                 thread::sleep(Duration::from_secs(interval.max(1)));
             }
         }
@@ -102,9 +112,12 @@ fn resolve_ports_expr(ports: Option<String>, use_default: bool) -> String {
     }
 }
 
-fn run_scan_once(host: &str, ports_expr: &str, timeout: u64, json: bool) {
+fn run_scan_once(host: &str, ports_expr: &str, timeout: u64, json: bool, open_only: bool) {
     let ports = parse_ports_expr(ports_expr);
-    let rows = scan_ports(host, &ports, timeout);
+    let mut rows = scan_ports(host, &ports, timeout);
+    if open_only {
+        rows.retain(|row| row.open);
+    }
 
     if json {
         match serde_json::to_string_pretty(&rows) {
@@ -117,19 +130,78 @@ fn run_scan_once(host: &str, ports_expr: &str, timeout: u64, json: bool) {
         return;
     }
 
-    println!("host={} ports={} timeout={}ms", host, ports_expr, timeout);
-    println!("{:<8} {:<8} {:<8} {:<24} {}", "PORT", "STATE", "PID", "PROCESS", "DETAIL");
+    let open_count = rows.iter().filter(|r| r.open).count();
+    let closed_count = rows.len().saturating_sub(open_count);
+
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL)
+        .apply_modifier(UTF8_ROUND_CORNERS)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec![
+            Cell::new("PORT").add_attribute(Attribute::Bold),
+            Cell::new("STATE").add_attribute(Attribute::Bold),
+            Cell::new("PID").add_attribute(Attribute::Bold),
+            Cell::new("PROCESS").add_attribute(Attribute::Bold),
+            Cell::new("DETAIL").add_attribute(Attribute::Bold),
+        ]);
+
     for row in rows {
-        println!(
-            "{:<8} {:<8} {:<8} {:<24} {}",
-            row.port,
-            if row.open { "OPEN" } else { "CLOSED" },
-            row.pid
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "-".to_string()),
-            row.process_name.unwrap_or_else(|| "-".to_string()),
-            row.message
-        );
+        let state = if row.open {
+            Cell::new("OPEN").fg(Color::Green).add_attribute(Attribute::Bold)
+        } else {
+            Cell::new("CLOSED").fg(Color::Red)
+        };
+
+        table.add_row(vec![
+            Cell::new(row.port),
+            state,
+            Cell::new(row.pid.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string())),
+            Cell::new(row.process_name.unwrap_or_else(|| "-".to_string())),
+            Cell::new(short_detail(&localize_detail(&row.message))),
+        ]);
     }
-    println!();
+
+    println!("host={host} | timeout={}ms", timeout);
+    println!("ports={ports_expr}");
+    println!("summary: OPEN={open_count}, CLOSED={closed_count}");
+    println!("{table}\n");
+}
+
+fn short_detail(message: &str) -> String {
+    const MAX: usize = 48;
+    if message.len() <= MAX {
+        return message.to_string();
+    }
+    let mut s = message.chars().take(MAX - 3).collect::<String>();
+    s.push_str("...");
+    s
+}
+
+fn localize_detail(message: &str) -> String {
+    let lower = message.to_ascii_lowercase();
+
+    if lower.contains("connection succeeded") {
+        return "연결 성공".to_string();
+    }
+    if lower.contains("connection refused") {
+        return "연결 거부됨".to_string();
+    }
+    if lower.contains("timed out") {
+        return "연결 시간 초과".to_string();
+    }
+    if lower.contains("invalid address") {
+        return "잘못된 주소 형식".to_string();
+    }
+    if lower.contains("no route to host") {
+        return "호스트 경로 없음".to_string();
+    }
+    if lower.contains("network is unreachable") {
+        return "네트워크에 도달할 수 없음".to_string();
+    }
+    if lower.contains("permission denied") {
+        return "권한 거부됨".to_string();
+    }
+
+    message.to_string()
 }
