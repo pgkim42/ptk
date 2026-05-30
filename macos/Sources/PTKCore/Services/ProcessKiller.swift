@@ -5,19 +5,17 @@ public struct KillTarget: Equatable, Sendable {
     public let pid: Int
     public let processName: String
 
-    public init?(port: UInt16, pid: Int?, processName: String?) {
-        guard let pid, pid > 0, let processName, !processName.isEmpty else {
-            return nil
-        }
+    public init(port: UInt16, pid: Int, processName: String) {
         self.port = port
         self.pid = pid
         self.processName = processName
     }
 
-    public init(port: UInt16, pid: Int, processName: String) {
-        self.port = port
-        self.pid = pid
-        self.processName = processName
+    public static func safe(port: UInt16, pid: Int?, processName: String?) -> KillTarget? {
+        guard let pid, pid > 0, let processName, !processName.isEmpty else {
+            return nil
+        }
+        return KillTarget(port: port, pid: pid, processName: processName)
     }
 }
 

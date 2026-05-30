@@ -1,51 +1,71 @@
 # ptk
 
-현재 버전: `v0.3` (`package/cargo semver: 0.3.0`)
+현재 버전: `v0.4-swift-migration` (Swift macOS menu-bar parity in progress)
 
-로컬 개발 중 남겨진 포트(예: `3000`, `8080`)를 감시하고, 점유 프로세스를 확인/종료하는 도구입니다.
+로컬 개발 중 남겨진 포트(예: `3000`, `8080`)를 감시하고, 점유 프로세스를 확인/종료하는 macOS 메뉴 막대 도구입니다.
+
+## 현재 기본 앱
+
+- 기본 실행 대상: `macos/`의 native Swift macOS 앱
+- UI 셸: AppKit `NSStatusItem` 메뉴 막대 앱
+- 배포 대상: macOS 13+
+- 런타임 경계: Swift 앱은 Rust/Tauri 코어를 호출하거나 embed하지 않습니다.
+- 기존 `ui/`, `src-tauri/`, `port-watch-cli`는 Swift parity 검증 전까지 남겨둔 legacy/reference 구현입니다.
 
 ## 기본 포트 프로파일
+
+Swift 앱의 기본 감시 포트는 기존 문서/레거시 상수와 동일합니다.
 
 - `3000-3009` (Next.js 계열)
 - `5173-5182` (Vite 계열)
 - `4200-4209` (Angular 계열)
 - `8080-8089` (Spring Boot 계열)
 
-## 기능
+표현식: `3000-3009,5173-5182,4200-4209,8080-8089`
 
-- GUI(Tauri)
-  - 기본 포트 자동 로드
-  - 3초 주기 자동 감시(기본 ON)
-  - 열린 포트만 표시(기본 ON, 토글 가능)
-  - 잘못된 포트 입력 시 즉시 오류 표시(strict parsing)
-  - 수동 즉시 스캔
-  - 포트별 PID/프로세스명 표시
-  - 확인 다이얼로그 후 프로세스 종료
-  - 프로세스명 불일치/조회 실패 시 기본 종료 차단
-  - `정보 불일치 시 강행` 옵션으로만 강행 종료 허용
-- CLI
-  - `scan`: 1회 조회
-  - `watch`: 반복 감시
-  - `--open-only`: 열린 포트만 출력
-  - `kill --force`: 강제 종료(기본은 soft 종료)
-  - `kill --expect-name`: 프로세스명 검증 후 종료
-  - `kill --allow-mismatch`: 불일치/조회 실패 시 경고 후 강행 종료
-  - 테이블 형태 출력 + `OPEN/CLOSED` 색상 표시
-  - `DETAIL` 메시지 한국어 표시(예: `연결 거부됨`)
-  - `kill`: PID 종료
+## Swift 메뉴 막대 기능
 
-## 개발 실행
+- 메뉴 막대 제목에 열린 감시 포트 수 표시
+- 열린 감시 포트 목록 표시
+- 포트별 PID/프로세스명 표시(조회 가능할 때)
+- 수동 새로고침
+- 새로고침 주기 프리셋(`1s`, `3s`, `5s`, `10s`) 및 `UserDefaults` 저장
+- 종료 전 native 확인 알림
+- 확인 후 포트/PID/프로세스명을 즉시 재조회하고, 불일치나 조회 실패 시 종료 차단
+- 첫 Swift parity에서는 soft 종료(`SIGTERM`)만 사용하며 force kill과 mismatch override는 제공하지 않습니다.
+
+## Swift 개발 실행
 
 사전 준비:
-- Node.js 18+
-- Rust (`rustup`)
+- Xcode 26.5+ 또는 Swift 6.3+ toolchain
+- macOS 개발 환경
+
+검증:
+
+```bash
+cd macos && swift test
+cd macos && swift build
+cd macos && xcodebuild -scheme PTK -destination 'platform=macOS' test
+```
+
+실행(개발용):
+
+```bash
+cd macos && swift run PTK
+```
+
+## 레거시 / reference 구현
+
+아래 명령은 Swift 앱 parity 검증이 끝날 때까지 동작 비교와 회귀 참고용으로만 유지합니다. 새 기능은 `macos/` Swift 앱에 우선 구현합니다.
+
+### Legacy Tauri GUI
 
 ```bash
 npm install
 npm run tauri dev
 ```
 
-## CLI 실행 예시
+### Legacy Rust CLI 예시
 
 ```bash
 cd src-tauri
@@ -60,44 +80,20 @@ cargo run --bin port-watch-cli -- kill --pid 12345 --yes --expect-name node
 cargo run --bin port-watch-cli -- kill --pid 12345 --yes --expect-name node --allow-mismatch
 ```
 
-## kill 안전 정책 및 종료코드
+### Legacy kill 정책 참고
 
-- 기본 정책
-  - GUI: `pid + process_name` 검증 실패 시 종료 차단
-  - CLI: `--expect-name` 미지정 시 호환 모드로 동작(경고 출력 후 PID 단독 종료)
-- 강행 정책
-  - GUI: `정보 불일치 시 강행` 체크 시에만 강행 종료 허용
-  - CLI: `--allow-mismatch` 지정 시에만 불일치/조회 실패 강행 허용
-- 참고: 검증은 오인 종료 위험을 줄이기 위한 장치이며, PID 재사용 경합(TOCTOU)을 완전히 제거하지는 않습니다.
+- GUI: `pid + process_name` 검증 실패 시 종료 차단
+- CLI: `--expect-name` 미지정 시 호환 모드로 동작(경고 출력 후 PID 단독 종료)
+- CLI `--allow-mismatch`: 불일치/조회 실패 시 경고 후 강행 종료
 
-CLI `kill` 종료코드:
-- `0`: 종료 성공
-- `1`: OS 명령 실패/권한 문제
-- `2`: 인자 오류(`--yes` 누락, 잘못된 pid 등)
-- `3`: 안전검증 차단(프로세스명 불일치/조회 실패)
+Swift 앱은 위 legacy 강행 정책을 첫 parity에 포함하지 않습니다.
 
-## Windows 빌드 (exe 우선)
+## old-stack 삭제 게이트
 
-사전 준비:
-- Rust (MSVC toolchain)
-- Node.js 18+
-- Visual Studio C++ Build Tools
-- WebView2 Runtime
+`ui/`, `src-tauri/`, Node/Tauri packaging, Windows/Linux 빌드 문서는 Swift 메뉴 막대 core parity 증거가 기록된 뒤 별도 cleanup에서 삭제합니다. 삭제 전 최소 조건:
 
-GUI exe:
-
-```bash
-npm install
-npm run tauri build
-```
-
-CLI exe:
-
-```bash
-cd src-tauri
-cargo build --release --bin port-watch-cli
-```
-
-산출물 예시:
-- GUI 번들: `src-tauri/target/release/bundle/`
-- CLI exe: `src-tauri/target/release/port-watch-cli.exe`
+- Swift 앱 build/test 통과
+- 기본 포트가 README와 Swift 상수에서 동일
+- 메뉴 막대 count/list/PID/process/refresh/interval/kill-confirmation/revalidation 동작 검증
+- `.omx/evidence/` 또는 ultragoal checkpoint에 parity 증거 기록
+- 기존 Tauri/CLI가 supported product path가 아니라 legacy/reference임이 문서화됨

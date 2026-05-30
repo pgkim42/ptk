@@ -19,7 +19,7 @@ public struct PortMenuRow: Equatable, Sendable {
             parts.append(processName)
         }
         self.displayText = parts.joined(separator: " · ")
-        self.killTarget = KillTarget(port: status.port, pid: status.pid, processName: status.processName)
+        self.killTarget = KillTarget.safe(port: status.port, pid: status.pid, processName: status.processName)
         self.canRequestKill = killTarget != nil
     }
 }

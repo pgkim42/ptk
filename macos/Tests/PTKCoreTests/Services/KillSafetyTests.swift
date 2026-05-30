@@ -36,9 +36,9 @@ struct FakeConfirmer: KillConfirming {
             service: KillService(resolver: FakeResolver(info: nil), terminator: FakeTerminator())
         )
 
-        #expect(KillTarget(port: 3000, pid: nil, processName: "node") == nil)
-        #expect(KillTarget(port: 3000, pid: Optional(0), processName: "node") == nil)
-        #expect(KillTarget(port: 3000, pid: 111, processName: nil) == nil)
+        #expect(KillTarget.safe(port: 3000, pid: nil, processName: "node") == nil)
+        #expect(KillTarget.safe(port: 3000, pid: Optional(0), processName: "node") == nil)
+        #expect(KillTarget.safe(port: 3000, pid: 111, processName: nil) == nil)
         #expect(throws: KillError.unsafeTarget) {
             try coordinator.requestKill(target: nil)
         }

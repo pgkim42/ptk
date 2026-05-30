@@ -11,7 +11,9 @@ public struct LsofParser: Sendable {
             let columns = text.split { $0.isWhitespace }.map(String.init)
             guard columns.count >= 2, let pid = Int(columns[1]), pid > 0 else { continue }
             guard let name = tcpName(in: text), let port = parsePort(fromTCPName: name) else { continue }
-            output[port, default: pid] = output[port] ?? pid
+            if output[port] == nil {
+                output[port] = pid
+            }
         }
 
         return output
