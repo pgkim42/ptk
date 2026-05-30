@@ -100,11 +100,25 @@ struct FakeConfirmer: KillConfirming {
         #expect(terminator.terminatedPIDs.isEmpty)
     }
 
-    @Test func lookupFailureBlocksTermination() {
+    @Test func vanishedPortBlocksTermination() {
         let terminator = FakeTerminator()
         let service = KillService(resolver: FakeResolver(info: nil), terminator: terminator)
 
-        #expect(throws: KillError.lookupFailed) {
+        #expect(throws: KillError.portNoLongerListening) {
+            try service.terminateAfterRevalidation(target: KillTarget(port: 3000, pid: 111, processName: "node"))
+        }
+        #expect(terminator.terminatedPIDs.isEmpty)
+    }
+
+
+    @Test func resolverErrorIsSurfaced() {
+        let terminator = FakeTerminator()
+        let service = KillService(
+            resolver: FakeResolver(info: nil, error: ProcessLookupError.lsofFailed("denied")),
+            terminator: terminator
+        )
+
+        #expect(throws: KillError.resolverFailed("denied")) {
             try service.terminateAfterRevalidation(target: KillTarget(port: 3000, pid: 111, processName: "node"))
         }
         #expect(terminator.terminatedPIDs.isEmpty)

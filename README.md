@@ -1,12 +1,12 @@
 # ptk
 
-현재 버전: `v0.4-swift-migration` (Swift macOS menu-bar parity in progress)
+현재 버전: `v0.4-swift-migration` (Swift macOS menu-bar migration target)
 
 로컬 개발 중 남겨진 포트(예: `3000`, `8080`)를 감시하고, 점유 프로세스를 확인/종료하는 macOS 메뉴 막대 도구입니다.
 
-## 현재 기본 앱
+## Swift 마이그레이션 대상
 
-- 기본 실행 대상: `macos/`의 native Swift macOS 앱
+- 마이그레이션 대상: `macos/`의 native Swift macOS 앱
 - UI 셸: AppKit `NSStatusItem` 메뉴 막대 앱
 - 배포 대상: macOS 13+
 - 런타임 경계: Swift 앱은 Rust/Tauri 코어를 호출하거나 embed하지 않습니다.

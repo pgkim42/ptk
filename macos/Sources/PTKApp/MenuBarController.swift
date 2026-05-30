@@ -2,11 +2,12 @@ import AppKit
 import PTKCore
 
 @MainActor
-final class MenuBarController: NSObject {
+final class MenuBarController: NSObject, @preconcurrency KillConfirming {
     private let settings: AppSettings
     private let parser: PortRangeParser
     private let scanner: PortScanner
     private let killService: KillService
+    private var refreshScheduler: RefreshScheduler?
     private var statusItem: NSStatusItem?
     private var refreshTimer: Timer?
     private var statuses: [PortStatus] = []
@@ -23,28 +24,32 @@ final class MenuBarController: NSObject {
         self.scanner = scanner
         self.killService = killService
         super.init()
+        self.refreshScheduler = RefreshScheduler(interval: settings.refreshInterval) { [weak self] in
+            self?.performRefresh()
+        }
     }
 
     func start() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
-        refreshNow()
+        refreshScheduler?.triggerManualRefresh()
         scheduleRefreshTimer()
     }
 
     @objc private func refreshAction(_ sender: Any?) {
-        refreshNow()
+        refreshScheduler?.triggerManualRefresh()
     }
 
     @objc private func killPort(_ sender: NSMenuItem) {
-        guard let target = sender.representedObject as? KillTarget else { return }
-        guard confirmKill(target: target) else { return }
+        let coordinator = KillCoordinator(confirmer: self, service: killService)
         do {
-            try killService.terminateAfterRevalidation(target: target)
-            refreshNow()
+            let outcome = try coordinator.requestKill(target: sender.representedObject as? KillTarget)
+            if outcome == .terminated {
+                refreshScheduler?.triggerManualRefresh()
+            }
         } catch {
             showAlert(title: "종료 실패", message: "\(error)")
-            refreshNow()
+            refreshScheduler?.triggerManualRefresh()
         }
     }
 
@@ -54,6 +59,7 @@ final class MenuBarController: NSObject {
             return
         }
         settings.refreshInterval = interval
+        refreshScheduler?.changeInterval(to: interval)
         scheduleRefreshTimer()
         rebuildMenu()
     }
@@ -70,10 +76,10 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func timerFired(_ timer: Timer) {
-        refreshNow()
+        refreshScheduler?.triggerManualRefresh()
     }
 
-    private func refreshNow() {
+    private func performRefresh() {
         do {
             let ports = try parser.parse(settings.watchedPortsExpression)
             statuses = scanner.scan(ports: ports)
@@ -127,7 +133,7 @@ final class MenuBarController: NSObject {
         statusItem?.menu = menu
     }
 
-    private func confirmKill(target: KillTarget) -> Bool {
+    func confirmKill(target: KillTarget) -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "프로세스를 종료할까요?"

@@ -21,7 +21,9 @@ public struct KillTarget: Equatable, Sendable {
 
 public enum KillError: Error, Equatable, CustomStringConvertible {
     case unsafeTarget
-    case lookupFailed
+    case portNoLongerListening
+    case processNameUnavailable
+    case resolverFailed(String)
     case pidChanged(expected: Int, actual: Int)
     case processNameMismatch(expected: String, actual: String)
     case terminationFailed(String)
@@ -30,8 +32,12 @@ public enum KillError: Error, Equatable, CustomStringConvertible {
         switch self {
         case .unsafeTarget:
             return "kill target is missing a safe PID or process name"
-        case .lookupFailed:
-            return "process lookup failed; refresh and try again"
+        case .portNoLongerListening:
+            return "port is no longer listening; refresh and try again"
+        case .processNameUnavailable:
+            return "process name is unavailable; refresh and try again"
+        case .resolverFailed(let message):
+            return "process lookup failed: \(message)"
         case .pidChanged(let expected, let actual):
             return "PID changed from \(expected) to \(actual); refresh and try again"
         case .processNameMismatch(let expected, let actual):
@@ -86,8 +92,18 @@ public struct KillService {
     }
 
     public func terminateAfterRevalidation(target: KillTarget) throws {
-        guard let current = try resolver.info(for: target.port), let currentName = current.processName else {
-            throw KillError.lookupFailed
+        let current: PortProcessInfo?
+        do {
+            current = try resolver.info(for: target.port)
+        } catch {
+            throw KillError.resolverFailed("\(error)")
+        }
+
+        guard let current else {
+            throw KillError.portNoLongerListening
+        }
+        guard let currentName = current.processName, !currentName.isEmpty else {
+            throw KillError.processNameUnavailable
         }
         guard current.pid == target.pid else {
             throw KillError.pidChanged(expected: target.pid, actual: current.pid)
