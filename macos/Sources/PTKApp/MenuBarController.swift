@@ -125,7 +125,9 @@ final class MenuBarController: NSObject, @preconcurrency KillConfirming {
         }
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "새로고침", action: #selector(refreshAction(_:)), keyEquivalent: "r"))
+        let refreshItem = NSMenuItem(title: "새로고침", action: #selector(refreshAction(_:)), keyEquivalent: "r")
+        refreshItem.target = self
+        menu.addItem(refreshItem)
         menu.addItem(refreshIntervalMenuItem(model: model))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
