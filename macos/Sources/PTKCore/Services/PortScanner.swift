@@ -56,8 +56,16 @@ public struct PortScanner {
 
             switch lookupResult {
             case .success(let pidMap):
-                guard let pid = pidMap[port] else {
+                guard let pids = pidMap[port] else {
                     return PortStatus(port: port, isOpen: true)
+                }
+                guard pids.count == 1, let pid = pids.first else {
+                    let pidList = pids.sorted().map(String.init).joined(separator: ", ")
+                    return PortStatus(
+                        port: port,
+                        isOpen: true,
+                        message: "ambiguous process lookup: port \(port) has PIDs \(pidList)"
+                    )
                 }
                 return PortStatus(
                     port: port,

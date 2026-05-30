@@ -1,8 +1,8 @@
 public struct LsofParser: Sendable {
     public init() {}
 
-    public func parseListeningPIDMap(_ stdout: String) -> [UInt16: Int] {
-        var output: [UInt16: Int] = [:]
+    public func parseListeningPIDMap(_ stdout: String) -> [UInt16: Set<Int>] {
+        var output: [UInt16: Set<Int>] = [:]
 
         for line in stdout.split(separator: "\n", omittingEmptySubsequences: false).dropFirst() {
             let text = String(line)
@@ -11,9 +11,7 @@ public struct LsofParser: Sendable {
             let columns = text.split { $0.isWhitespace }.map(String.init)
             guard columns.count >= 2, let pid = Int(columns[1]), pid > 0 else { continue }
             guard let name = tcpName(in: text), let port = parsePort(fromTCPName: name) else { continue }
-            if output[port] == nil {
-                output[port] = pid
-            }
+            output[port, default: []].insert(pid)
         }
 
         return output

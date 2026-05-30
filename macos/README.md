@@ -1,22 +1,20 @@
 # PTK macOS Swift app
 
-This directory contains the native macOS Swift migration target for PTK.
-The first implementation uses a Swift Package with an AppKit `NSStatusItem`
-menu-bar executable and a separate testable `PTKCore` module. This keeps the
-menu-bar app buildable with copy-paste-safe SwiftPM and Xcode commands while
-leaving the old Tauri/Rust stack untouched as a behavioral reference.
+이 디렉터리는 PTK의 native macOS Swift 앱입니다. 앱은 Swift Package로 구성되어 있으며, AppKit `NSStatusItem` 기반 메뉴 막대 실행 파일과 테스트 가능한 `PTKCore` 모듈을 포함합니다.
 
-## Scaffold decision
+## 구성
 
-- Project shape: Swift Package under `macos/` with executable app target
-  `PTKApp`, library target `PTKCore`, and test target `PTKCoreTests`.
-- UI shell direction: AppKit `NSStatusItem`.
-- Deployment target: macOS 13 or newer.
-- Runtime boundary: the Swift app must not call or embed the Rust/Tauri core.
+- `PTKApp`: AppKit 메뉴 막대 앱 진입점
+- `PTKCore`: 포트 파싱, 스캔, 프로세스 조회, 종료 안전 로직
+- `PTKCoreTests`: core 단위 테스트
 
-## Build and test
+## 런타임 경계
 
-From the repository root:
+이 앱은 Swift/AppKit만 사용합니다. Rust, Tauri, Node, 별도 CLI 스택에 의존하지 않습니다.
+
+## 빌드 및 테스트
+
+저장소 루트에서 실행:
 
 ```bash
 cd macos && swift test
@@ -24,4 +22,10 @@ cd macos && swift build
 cd macos && xcodebuild -scheme PTK -destination 'platform=macOS' test
 ```
 
-The executable product is named `PTK`.
+개발 실행:
+
+```bash
+cd macos && swift run PTK
+```
+
+실행 제품 이름은 `PTK`입니다.

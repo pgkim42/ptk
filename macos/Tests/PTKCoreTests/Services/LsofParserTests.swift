@@ -2,7 +2,7 @@ import Testing
 @testable import PTKCore
 
 @Suite struct LsofParserTests {
-    @Test func parsesListeningPortsAndKeepsFirstPID() {
+    @Test func parsesListeningPortsAndKeepsAllPIDs() {
         let sample = """
 COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
 node      111 pgkim  20u  IPv4 0xabcd      0t0  TCP *:3000 (LISTEN)
@@ -14,9 +14,9 @@ bad       nope pgkim  8u  IPv4 0xef01      0t0  TCP *:8080 (LISTEN)
 """
 
         let map = LsofParser().parseListeningPIDMap(sample)
-        #expect(map[3000] == 111)
-        #expect(map[5173] == 333)
-        #expect(map[4200] == 444)
+        #expect(map[3000] == Set([111, 222]))
+        #expect(map[5173] == Set([333]))
+        #expect(map[4200] == Set([444]))
         #expect(map[61000] == nil)
         #expect(map[8080] == nil)
     }

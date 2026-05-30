@@ -40,4 +40,29 @@ node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
         #expect(status.processName == nil)
         #expect(status.message?.contains("process lookup failed") == true)
     }
+
+    @Test func ambiguousSamePortListenersDisableKillTarget() {
+        let runner = FakeProcessRunner()
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 0,
+            stdout: """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
+            vite    222 me   1u IPv6 0x2    0t0      TCP *:3000 (LISTEN)
+            """
+        )
+        let scanner = PortScanner(
+            connector: FakeSocketConnector(openPorts: [3000]),
+            lookup: ProcessLookup(runner: runner)
+        )
+
+        let status = scanner.scan(ports: [3000])[0]
+        let row = MenuModel(statuses: [status]).rows[0]
+        #expect(status.isOpen)
+        #expect(status.pid == nil)
+        #expect(status.processName == nil)
+        #expect(status.message?.contains("ambiguous") == true)
+        #expect(row.killTarget == nil)
+        #expect(!row.canRequestKill)
+    }
 }

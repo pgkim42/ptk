@@ -1,99 +1,133 @@
-# ptk
+# PTK
 
-현재 버전: `v0.4-swift-migration` (Swift macOS menu-bar migration target)
+PTK는 로컬 개발 중 열려 있는 개발 서버 포트를 감시하고, 점유 중인 프로세스를 안전하게 확인·종료하기 위한 macOS 메뉴 막대 도구입니다.
 
-로컬 개발 중 남겨진 포트(예: `3000`, `8080`)를 감시하고, 점유 프로세스를 확인/종료하는 macOS 메뉴 막대 도구입니다.
+현재 구현은 **native Swift/AppKit 앱**입니다. 이전 Rust/Tauri/CLI 스택은 저장소에서 제거했고, 런타임과 빌드 경로는 Swift Package 하나로 단순화했습니다.
 
-## Swift 마이그레이션 대상
+## 현재 상태
 
-- 마이그레이션 대상: `macos/`의 native Swift macOS 앱
-- UI 셸: AppKit `NSStatusItem` 메뉴 막대 앱
-- 배포 대상: macOS 13+
-- 런타임 경계: Swift 앱은 Rust/Tauri 코어를 호출하거나 embed하지 않습니다.
-- 기존 `ui/`, `src-tauri/`, `port-watch-cli`는 Swift parity 검증 전까지 남겨둔 legacy/reference 구현입니다.
+- 현재 버전: `v0.4-swift-migration`
+- 구현 위치: `macos/`
+- UI: AppKit `NSStatusItem` 기반 메뉴 막대 앱
+- 지원 대상: macOS 13 이상
+- 런타임 경계: Swift 앱은 Rust, Tauri, Node, CLI 스택에 의존하지 않습니다.
 
-## 기본 포트 프로파일
+## 하는 일
 
-Swift 앱의 기본 감시 포트는 기존 문서/레거시 상수와 동일합니다.
+PTK는 지정된 포트 범위를 주기적으로 확인해 다음 정보를 메뉴 막대에서 보여줍니다.
 
-- `3000-3009` (Next.js 계열)
-- `5173-5182` (Vite 계열)
-- `4200-4209` (Angular 계열)
-- `8080-8089` (Spring Boot 계열)
+- 현재 열려 있는 감시 대상 포트 수
+- 열린 포트 목록
+- 포트를 점유한 PID
+- 프로세스명
+- 수동 새로고침
+- 새로고침 주기 선택
+- 안전한 프로세스 종료 요청
 
-표현식: `3000-3009,5173-5182,4200-4209,8080-8089`
+프로세스 종료는 즉시 실행하지 않습니다. 사용자의 확인을 받은 뒤, 종료 직전에 포트·PID·프로세스명을 다시 확인하고, 대상이 바뀌었거나 모호하면 종료를 차단합니다.
 
-## Swift 메뉴 막대 기능
+## 기본 감시 포트
+
+Swift 앱의 기본 감시 포트는 README와 Swift 상수, 테스트가 서로 동기화되어야 합니다.
+
+| 범위 | 용도 |
+| --- | --- |
+| `3000-3009` | Next.js 계열 개발 서버 |
+| `5173-5182` | Vite 계열 개발 서버 |
+| `4200-4209` | Angular 계열 개발 서버 |
+| `8080-8089` | Spring Boot 계열 개발 서버 |
+
+기본 표현식:
+
+```text
+3000-3009,5173-5182,4200-4209,8080-8089
+```
+
+기본 포트 프로파일을 바꾸면 다음 위치를 함께 갱신해야 합니다.
+
+- `README.md`
+- `macos/Sources/PTKCore/Domain/AppDefaults.swift`
+- `macos/Tests/PTKCoreTests/Domain/PortRangeParserTests.swift`
+
+## 프로젝트 구조
+
+```text
+macos/
+├── Package.swift
+├── Sources/
+│   ├── PTKApp/      # AppKit 메뉴 막대 앱 진입점
+│   └── PTKCore/     # 포트 파싱, 스캔, 프로세스 조회, 종료 안전 로직
+└── Tests/
+    └── PTKCoreTests/
+```
+
+## Swift 메뉴 막대 앱 동작
 
 - 메뉴 막대 제목에 열린 감시 포트 수 표시
-- 열린 감시 포트 목록 표시
-- 포트별 PID/프로세스명 표시(조회 가능할 때)
-- 수동 새로고침
-- 새로고침 주기 프리셋(`1s`, `3s`, `5s`, `10s`) 및 `UserDefaults` 저장
-- 종료 전 native 확인 알림
-- 확인 후 포트/PID/프로세스명을 즉시 재조회하고, 불일치나 조회 실패 시 종료 차단
-- 첫 Swift parity에서는 soft 종료(`SIGTERM`)만 사용하며 force kill과 mismatch override는 제공하지 않습니다.
+- 열린 포트만 메뉴 row로 표시
+- PID와 프로세스명을 확인할 수 있을 때만 종료 action 활성화
+- 같은 포트에 여러 PID가 매핑되는 모호한 listener는 종료 비활성화
+- 새로고침 주기 프리셋 제공: `1s`, `3s`, `5s`, `10s`
+- 선택한 새로고침 주기는 `UserDefaults`에 저장
+- 종료는 `SIGTERM`만 사용
+- force kill 또는 mismatch override는 제공하지 않음
 
-## Swift 개발 실행
+## 실행 및 검증
 
-사전 준비:
-- Xcode 26.5+ 또는 Swift 6.3+ toolchain
-- macOS 개발 환경
-
-검증:
+### 테스트
 
 ```bash
-cd macos && swift test
-cd macos && swift build
-cd macos && xcodebuild -scheme PTK -destination 'platform=macOS' test
+cd macos
+swift test
 ```
 
-실행(개발용):
+### 빌드
 
 ```bash
-cd macos && swift run PTK
+cd macos
+swift build
 ```
 
-## 레거시 / reference 구현
-
-아래 명령은 Swift 앱 parity 검증이 끝날 때까지 동작 비교와 회귀 참고용으로만 유지합니다. 새 기능은 `macos/` Swift 앱에 우선 구현합니다.
-
-### Legacy Tauri GUI
+### Xcode 테스트
 
 ```bash
-npm install
-npm run tauri dev
+cd macos
+xcodebuild -scheme PTK -destination 'platform=macOS' test
 ```
 
-### Legacy Rust CLI 예시
+### 개발 실행
 
 ```bash
-cd src-tauri
-cargo run --bin port-watch-cli -- scan --use-default
-cargo run --bin port-watch-cli -- watch --use-default --interval 3
-cargo run --bin port-watch-cli -- watch --use-default --interval 3 --open-only
-cargo run --bin port-watch-cli -- scan --ports "3000-3009,8080-8089" --json
-cargo run --bin port-watch-cli -- scan --use-default --open-only --json
-cargo run --bin port-watch-cli -- kill --pid 12345 --yes
-cargo run --bin port-watch-cli -- kill --pid 12345 --yes --force
-cargo run --bin port-watch-cli -- kill --pid 12345 --yes --expect-name node
-cargo run --bin port-watch-cli -- kill --pid 12345 --yes --expect-name node --allow-mismatch
+cd macos
+swift run PTK
 ```
 
-### Legacy kill 정책 참고
+실행하면 일반 창 대신 macOS 상단 메뉴 막대에 `PTK 0` 같은 상태 항목이 나타납니다.
 
-- GUI: `pid + process_name` 검증 실패 시 종료 차단
-- CLI: `--expect-name` 미지정 시 호환 모드로 동작(경고 출력 후 PID 단독 종료)
-- CLI `--allow-mismatch`: 불일치/조회 실패 시 경고 후 강행 종료
+## 종료 안전 정책
 
-Swift 앱은 위 legacy 강행 정책을 첫 parity에 포함하지 않습니다.
+PTK의 Swift 앱은 프로세스 종료를 보수적으로 처리합니다.
 
-## old-stack 삭제 게이트
+1. 메뉴 row에 안전한 종료 대상이 있어야 합니다.
+   - 포트가 열려 있어야 함
+   - PID가 있어야 함
+   - 프로세스명이 있어야 함
+   - 같은 포트에 여러 PID가 걸린 모호한 상태가 아니어야 함
+2. 사용자가 native 확인 알림에서 종료를 승인해야 합니다.
+3. 종료 직전에 포트의 현재 프로세스를 다시 조회합니다.
+4. 다음 경우 종료를 차단합니다.
+   - 포트가 더 이상 열려 있지 않음
+   - PID가 바뀜
+   - 프로세스명이 바뀜
+   - 프로세스명을 확인할 수 없음
+   - 같은 포트의 listener가 모호함
+5. 통과한 경우에만 `SIGTERM`을 보냅니다.
 
-`ui/`, `src-tauri/`, Node/Tauri packaging, Windows/Linux 빌드 문서는 Swift 메뉴 막대 core parity 증거가 기록된 뒤 별도 cleanup에서 삭제합니다. 삭제 전 최소 조건:
+테스트에서는 실제 프로세스를 종료하지 않습니다. 종료 로직은 fake resolver와 fake terminator를 통해 검증합니다.
 
-- Swift 앱 build/test 통과
-- 기본 포트가 README와 Swift 상수에서 동일
-- 메뉴 막대 count/list/PID/process/refresh/interval/kill-confirmation/revalidation 동작 검증
-- `.omx/evidence/` 또는 ultragoal checkpoint에 parity 증거 기록
-- 기존 Tauri/CLI가 supported product path가 아니라 legacy/reference임이 문서화됨
+## 개발 원칙
+
+- 변경은 가능한 한 작게 유지합니다.
+- Swift 앱 런타임에 Rust/Tauri/Node 의존성을 추가하지 않습니다.
+- 기본 포트 프로파일을 바꾸면 README와 코드 상수를 함께 갱신합니다.
+- 종료 관련 변경은 반드시 테스트로 안전 조건을 먼저 고정합니다.

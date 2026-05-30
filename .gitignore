@@ -1,19 +1,14 @@
-# Node
-node_modules/
-npm-debug.log*
-
-# Rust / Tauri build outputs
-src-tauri/target/
-
-# Optional editor/OS noise
-.DS_Store
-Thumbs.db
-
-# Codex plugin state
-.omx/
-
 # SwiftPM / Xcode local build state
 .build/
 .swiftpm/
 macos/.build/
 macos/.swiftpm/
+DerivedData/
+*.xcuserstate
+
+# Optional editor/OS noise
+.DS_Store
+Thumbs.db
+
+# Codex / OMX local state
+.omx/
