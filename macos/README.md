@@ -4,8 +4,10 @@
 
 ## 구성
 
-- `PTKApp`: AppKit 메뉴 막대 앱 진입점
-- `PTKCore`: 포트 파싱, 스캔, 프로세스 조회, 종료 안전 로직
+- `PTKApp`: AppKit 메뉴 막대 앱 셸 진입점
+- `PTKCore/Shell`: AIO 상태바 앱 공통 로직
+- `PTKCore/Features/PortMonitor`: 포트 파싱, 스캔, 프로세스 조회, 종료 안전 로직
+- `PTKCore/Features/ServiceMonitor`: Docker daemon과 주요 로컬 DB 포트 상태 표시 로직
 - `PTKCoreTests`: core 단위 테스트
 
 ## 런타임 경계

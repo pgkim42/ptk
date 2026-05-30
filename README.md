@@ -20,6 +20,8 @@ PTK는 지정된 포트 범위를 주기적으로 확인해 다음 정보를 메
 - 열린 포트 목록
 - 포트를 점유한 PID
 - 프로세스명
+- Docker daemon 상태
+- 주요 로컬 DB 서비스 포트 상태: PostgreSQL, MySQL, Redis, MongoDB
 - 수동 새로고침
 - 새로고침 주기 선택
 - 안전한 프로세스 종료 요청
@@ -46,8 +48,8 @@ Swift 앱의 기본 감시 포트는 README와 Swift 상수, 테스트가 서로
 기본 포트 프로파일을 바꾸면 다음 위치를 함께 갱신해야 합니다.
 
 - `README.md`
-- `macos/Sources/PTKCore/Domain/AppDefaults.swift`
-- `macos/Tests/PTKCoreTests/Domain/PortRangeParserTests.swift`
+- `macos/Sources/PTKCore/Features/PortMonitor/Domain/AppDefaults.swift`
+- `macos/Tests/PTKCoreTests/Features/PortMonitor/Domain/PortRangeParserTests.swift`
 
 ## 프로젝트 구조
 
@@ -55,9 +57,10 @@ Swift 앱의 기본 감시 포트는 README와 Swift 상수, 테스트가 서로
 macos/
 ├── Package.swift
 ├── Sources/
-│   ├── PTKApp/      # AppKit 메뉴 막대 앱 진입점
-│   └── PTKCore/     # 포트 파싱, 스캔, 프로세스 조회, 종료 안전 로직
+│   ├── PTKApp/      # AppKit 메뉴 막대 앱 셸 진입점
+│   └── PTKCore/     # Shell 공통 로직과 Features/* 도구 로직
 └── Tests/
+    ├── PTKAppTests/
     └── PTKCoreTests/
 ```
 
@@ -69,6 +72,7 @@ macos/
 - 같은 포트에 여러 PID가 매핑되는 모호한 listener는 종료 비활성화
 - 새로고침 주기 프리셋 제공: `1s`, `3s`, `5s`, `10s`
 - 선택한 새로고침 주기는 `UserDefaults`에 저장
+- Docker/DB 서비스 상태는 읽기 전용으로 표시
 - 종료는 `SIGTERM`만 사용
 - force kill 또는 mismatch override는 제공하지 않음
 
