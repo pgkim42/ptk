@@ -6,7 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = PTKCore.appName
+        item.button?.title = AppDefaults.appName
 
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "PTK 준비 중", action: nil, keyEquivalent: ""))
