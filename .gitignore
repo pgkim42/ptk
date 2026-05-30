@@ -11,3 +11,9 @@ Thumbs.db
 
 # Codex plugin state
 .omx/
+
+# SwiftPM / Xcode local build state
+.build/
+.swiftpm/
+macos/.build/
+macos/.swiftpm/
