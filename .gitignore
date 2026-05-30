@@ -10,5 +10,6 @@ DerivedData/
 .DS_Store
 Thumbs.db
 
-# Codex / OMX local state
+# Codex / OMO local state
+.omo/
 .omx/
