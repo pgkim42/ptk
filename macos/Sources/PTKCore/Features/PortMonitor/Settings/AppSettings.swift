@@ -1,16 +1,5 @@
 import Foundation
 
-public enum RefreshInterval: Double, CaseIterable, Equatable, Sendable {
-    case oneSecond = 1
-    case threeSeconds = 3
-    case fiveSeconds = 5
-    case tenSeconds = 10
-
-    public var label: String {
-        "\(Int(rawValue))s"
-    }
-}
-
 public protocol SettingsStore: AnyObject {
     func string(forKey key: String) -> String?
     func set(_ value: String, forKey key: String)
@@ -80,6 +69,14 @@ public final class AppSettings {
     public var watchedPortsExpression: String {
         get { store.string(forKey: Key.watchedPortsExpression) ?? AppDefaults.defaultWatchedPortsExpression }
         set { store.set(newValue, forKey: Key.watchedPortsExpression) }
+    }
+
+    public func updateWatchedPortsExpression(
+        _ expression: String,
+        parser: PortRangeParser = PortRangeParser()
+    ) throws {
+        _ = try parser.parse(expression)
+        watchedPortsExpression = expression
     }
 
     public var refreshInterval: RefreshInterval {

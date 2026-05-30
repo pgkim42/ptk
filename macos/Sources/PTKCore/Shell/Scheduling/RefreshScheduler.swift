@@ -1,3 +1,16 @@
+public enum RefreshInterval: Double, CaseIterable, Equatable, Sendable {
+    case oneSecond = 1
+    case threeSeconds = 3
+    case fiveSeconds = 5
+    case tenSeconds = 10
+
+    public static let defaultValue: RefreshInterval = .threeSeconds
+
+    public var label: String {
+        "\(Int(rawValue))s"
+    }
+}
+
 public enum RefreshTriggerResult: Equatable, Sendable {
     case started
     case skippedInFlight
@@ -9,7 +22,7 @@ public final class RefreshScheduler {
     private var isInFlight = false
     private let refresh: () -> Void
 
-    public init(interval: RefreshInterval = AppDefaults.defaultRefreshInterval, refresh: @escaping () -> Void) {
+    public init(interval: RefreshInterval = .defaultValue, refresh: @escaping () -> Void) {
         self.interval = interval
         self.refresh = refresh
     }
