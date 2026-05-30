@@ -6,6 +6,7 @@ final class MenuBarController: NSObject {
     private let settings: AppSettings
     private let parser: PortRangeParser
     private let scanner: PortScanner
+    private let killService: KillService
     private var statusItem: NSStatusItem?
     private var refreshTimer: Timer?
     private var statuses: [PortStatus] = []
@@ -14,11 +15,13 @@ final class MenuBarController: NSObject {
     init(
         settings: AppSettings = AppSettings(),
         parser: PortRangeParser = PortRangeParser(),
-        scanner: PortScanner = PortScanner()
+        scanner: PortScanner = PortScanner(),
+        killService: KillService = KillService()
     ) {
         self.settings = settings
         self.parser = parser
         self.scanner = scanner
+        self.killService = killService
         super.init()
     }
 
@@ -31,6 +34,18 @@ final class MenuBarController: NSObject {
 
     @objc private func refreshAction(_ sender: Any?) {
         refreshNow()
+    }
+
+    @objc private func killPort(_ sender: NSMenuItem) {
+        guard let target = sender.representedObject as? KillTarget else { return }
+        guard confirmKill(target: target) else { return }
+        do {
+            try killService.terminateAfterRevalidation(target: target)
+            refreshNow()
+        } catch {
+            showAlert(title: "종료 실패", message: "\(error)")
+            refreshNow()
+        }
     }
 
     @objc private func selectInterval(_ sender: NSMenuItem) {
@@ -91,8 +106,14 @@ final class MenuBarController: NSObject {
             menu.addItem(emptyItem)
         } else {
             for row in model.rows {
-                let item = NSMenuItem(title: row.displayText, action: nil, keyEquivalent: "")
-                item.isEnabled = false
+                let item = NSMenuItem(
+                    title: row.canRequestKill ? "종료: \(row.displayText)" : row.displayText,
+                    action: row.canRequestKill ? #selector(killPort(_:)) : nil,
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = row.killTarget
+                item.isEnabled = row.canRequestKill
                 menu.addItem(item)
             }
         }
@@ -104,6 +125,25 @@ final class MenuBarController: NSObject {
         menu.addItem(NSMenuItem(title: "종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem?.menu = menu
+    }
+
+    private func confirmKill(target: KillTarget) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "프로세스를 종료할까요?"
+        alert.informativeText = "Port \(target.port), PID \(target.pid), \(target.processName)를 종료합니다."
+        alert.addButton(withTitle: "종료")
+        alert.addButton(withTitle: "취소")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "확인")
+        alert.runModal()
     }
 
     private func refreshIntervalMenuItem(model: MenuModel) -> NSMenuItem {
