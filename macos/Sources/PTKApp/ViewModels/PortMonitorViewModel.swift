@@ -9,6 +9,7 @@ final class PortMonitorViewModel: ObservableObject {
 
     @Published var portExpression: String
     @Published var refreshInterval: RefreshInterval
+    @Published var theme: AppTheme
 
     @Published var killConfirmationTarget: KillTarget?
     @Published var killErrorMessage: String?
@@ -42,6 +43,7 @@ final class PortMonitorViewModel: ObservableObject {
         self.parser = parser
         self.portExpression = settings.watchedPortsExpression
         self.refreshInterval = settings.refreshInterval
+        self.theme = settings.theme
         self.onRefresh = onRefresh
         self.onIntervalChange = onIntervalChange
     }
@@ -80,5 +82,10 @@ final class PortMonitorViewModel: ObservableObject {
         settings.refreshInterval = interval
         refreshInterval = interval
         onIntervalChange(interval)
+    }
+
+    func saveTheme(_ theme: AppTheme) {
+        settings.theme = theme
+        self.theme = theme
     }
 }

@@ -51,11 +51,9 @@ struct PortRowView: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))
-                        .frame(width: 22, height: 22)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.red, size: 22))
                 .help("프로세스 종료")
-                .foregroundStyle(PTKTheme.red)
             }
         }
         .padding(.horizontal, 9)

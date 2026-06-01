@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import PTKApp
 @testable import PTKCore
@@ -80,6 +81,92 @@ import Testing
         #expect(controller.viewModel.hasError)
         #expect(controller.viewModel.openPorts.isEmpty)
     }
+
+    @Test func startCanShowPanelImmediatelyForAutomation() {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        let controller = MenuBarController(
+            settings: settings,
+            serviceStatusLoader: { completion in
+                completion([])
+            }
+        )
+        defer { controller.stop() }
+
+        controller.start(showPanelOnLaunch: true)
+
+        #expect(controller.isPanelVisible)
+    }
+
+    @Test func panelSnapshotCanBeWrittenForAutomation() throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.theme = .dark
+        let controller = MenuBarController(
+            settings: settings,
+            serviceStatusLoader: { completion in
+                completion([])
+            }
+        )
+        defer { controller.stop() }
+        let snapshotURL = FileManager.default.temporaryDirectory
+            .appending(path: "ptk-panel-snapshot-test-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: snapshotURL) }
+
+        controller.start(showPanelOnLaunch: true)
+        try controller.writePanelSnapshot(to: snapshotURL)
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: snapshotURL.path)
+        #expect((attributes[.size] as? Int ?? 0) > 0)
+    }
+
+    @Test func settingsSnapshotCanBeWrittenForAutomation() throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        let controller = MenuBarController(
+            settings: settings,
+            serviceStatusLoader: { completion in
+                completion([])
+            }
+        )
+        defer { controller.stop() }
+        let snapshotURL = FileManager.default.temporaryDirectory
+            .appending(path: "ptk-settings-snapshot-test-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: snapshotURL) }
+
+        controller.start(showPanelOnLaunch: true)
+        try controller.writeSettingsSnapshot(to: snapshotURL)
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: snapshotURL.path)
+        #expect((attributes[.size] as? Int ?? 0) > 0)
+    }
+
+    @Test func iconButtonVisualStateResolvesHoverAndPressFeedback() {
+        let idle = PTKIconButtonVisualState(isHovering: false, isPressed: false)
+        let hovering = PTKIconButtonVisualState(isHovering: true, isPressed: false)
+        let pressed = PTKIconButtonVisualState(isHovering: true, isPressed: true)
+
+        #expect(idle.scale == 1)
+        #expect(hovering.scale > idle.scale)
+        #expect(hovering.backgroundOpacity > idle.backgroundOpacity)
+        #expect(pressed.scale < idle.scale)
+        #expect(pressed.backgroundOpacity > hovering.backgroundOpacity)
+    }
+
+    @Test func buttonInteractionSnapshotCanBeWrittenForAutomation() throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        let controller = MenuBarController(
+            settings: settings,
+            serviceStatusLoader: { completion in
+                completion([])
+            }
+        )
+        let snapshotURL = FileManager.default.temporaryDirectory
+            .appending(path: "ptk-button-interaction-snapshot-test-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: snapshotURL) }
+
+        try controller.writeButtonInteractionSnapshot(to: snapshotURL)
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: snapshotURL.path)
+        #expect((attributes[.size] as? Int ?? 0) > 0)
+    }
 }
 
 @MainActor
@@ -138,13 +225,26 @@ import Testing
         #expect(viewModel.refreshInterval == .tenSeconds)
         #expect(changedInterval == .tenSeconds)
     }
+
+    @Test func saveThemePersistsSelectionAndUpdatesViewModel() {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+        let viewModel = makeViewModel(settings: settings)
+
+        viewModel.saveTheme(.light)
+
+        let reloaded = AppSettings(store: store)
+        #expect(viewModel.theme == .light)
+        #expect(reloaded.theme == .light)
+    }
 }
 
 @MainActor private func makeViewModel(
+    settings: AppSettings = AppSettings(store: InMemorySettingsStore()),
     onIntervalChange: @escaping (RefreshInterval) -> Void = { _ in }
 ) -> PortMonitorViewModel {
     PortMonitorViewModel(
-        settings: AppSettings(store: InMemorySettingsStore()),
+        settings: settings,
         killService: KillService(
             resolver: ProcessLookup(runner: FakeProcessRunner()),
             terminator: FakeProcessTerminator()

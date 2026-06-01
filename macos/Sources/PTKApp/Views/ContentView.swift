@@ -85,6 +85,7 @@ struct ContentView: View {
                 viewModel.isShowingSettings = false
             }
         }
+        .preferredColorScheme(viewModel.theme.preferredColorScheme)
     }
 
     private var header: some View {
@@ -181,7 +182,6 @@ struct ContentView: View {
             iconButton("power", help: "종료") {
                 NSApplication.shared.terminate(nil)
             }
-            .foregroundStyle(PTKTheme.muted)
         }
         .padding(.horizontal, 12)
         .frame(height: 36)
@@ -234,12 +234,9 @@ struct ContentView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 12, weight: .semibold))
-                .frame(width: 24, height: 24)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 24))
         .help(help)
-        .foregroundStyle(PTKTheme.muted)
     }
 }
 
@@ -272,15 +269,53 @@ private struct EmptyPortsView: View {
 }
 
 enum PTKTheme {
-    static let panel = Color(red: 0.07, green: 0.08, blue: 0.10)
-    static let panelTop = Color(red: 0.12, green: 0.13, blue: 0.16)
-    static let table = Color.white.opacity(0.048)
-    static let card = Color.white.opacity(0.06)
-    static let border = Color.white.opacity(0.075)
-    static let text = Color.white.opacity(0.92)
-    static let muted = Color.white.opacity(0.58)
-    static let faint = Color.white.opacity(0.42)
+    static let panel = adaptive(
+        light: color(red: 0.94, green: 0.96, blue: 0.98),
+        dark: color(red: 0.07, green: 0.08, blue: 0.10)
+    )
+    static let panelTop = adaptive(
+        light: color(red: 1.00, green: 1.00, blue: 1.00),
+        dark: color(red: 0.12, green: 0.13, blue: 0.16)
+    )
+    static let table = adaptive(
+        light: color(white: 0.0, alpha: 0.045),
+        dark: color(white: 1.0, alpha: 0.048)
+    )
+    static let card = adaptive(
+        light: color(white: 0.0, alpha: 0.055),
+        dark: color(white: 1.0, alpha: 0.06)
+    )
+    static let border = adaptive(
+        light: color(white: 0.0, alpha: 0.10),
+        dark: color(white: 1.0, alpha: 0.075)
+    )
+    static let text = adaptive(
+        light: color(white: 0.06, alpha: 0.92),
+        dark: color(white: 1.0, alpha: 0.92)
+    )
+    static let muted = adaptive(
+        light: color(white: 0.12, alpha: 0.58),
+        dark: color(white: 1.0, alpha: 0.58)
+    )
+    static let faint = adaptive(
+        light: color(white: 0.12, alpha: 0.42),
+        dark: color(white: 1.0, alpha: 0.42)
+    )
     static let green = Color(red: 0.32, green: 0.86, blue: 0.50)
     static let red = Color(red: 0.92, green: 0.34, blue: 0.36)
     static let orange = Color(red: 1.00, green: 0.68, blue: 0.28)
+
+    private static func adaptive(light: NSColor, dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+        })
+    }
+
+    private static func color(red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat = 1.0) -> NSColor {
+        NSColor(calibratedRed: red, green: green, blue: blue, alpha: alpha)
+    }
+
+    private static func color(white: CGFloat, alpha: CGFloat) -> NSColor {
+        NSColor(calibratedWhite: white, alpha: alpha)
+    }
 }

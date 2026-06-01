@@ -5,6 +5,7 @@ struct SettingsSheetView: View {
     @State private var expression: String
     @State private var expressionError: String?
     @State private var selectedInterval: RefreshInterval
+    @State private var selectedTheme: AppTheme
 
     let viewModel: PortMonitorViewModel
     let onDismiss: () -> Void
@@ -14,6 +15,7 @@ struct SettingsSheetView: View {
         self.onDismiss = onDismiss
         _expression = State(initialValue: viewModel.portExpression)
         _selectedInterval = State(initialValue: viewModel.refreshInterval)
+        _selectedTheme = State(initialValue: viewModel.theme)
     }
 
     var body: some View {
@@ -46,6 +48,19 @@ struct SettingsSheetView: View {
                 .pickerStyle(.segmented)
             }
 
+            VStack(alignment: .leading, spacing: 4) {
+                Text("테마").font(.caption).foregroundStyle(.secondary)
+                Picker("", selection: $selectedTheme) {
+                    ForEach(AppTheme.allCases, id: \.self) { theme in
+                        Text(theme.label).tag(theme)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: selectedTheme) { theme in
+                    viewModel.saveTheme(theme)
+                }
+            }
+
             HStack {
                 Button("취소") {
                     onDismiss()
@@ -56,6 +71,7 @@ struct SettingsSheetView: View {
                     do {
                         try viewModel.saveExpression(expression)
                         viewModel.saveInterval(selectedInterval)
+                        viewModel.saveTheme(selectedTheme)
                         onDismiss()
                     } catch {
                         expressionError = "\(error)"
@@ -67,5 +83,7 @@ struct SettingsSheetView: View {
         }
         .padding()
         .frame(width: 320)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .preferredColorScheme(viewModel.theme.preferredColorScheme)
     }
 }

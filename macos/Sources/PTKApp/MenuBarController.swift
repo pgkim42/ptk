@@ -58,7 +58,11 @@ final class MenuBarController: NSObject {
         }
     }
 
-    func start() {
+    var isPanelVisible: Bool {
+        panel?.isVisible == true
+    }
+
+    func start(showPanelOnLaunch: Bool = false) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
         item.menu = nil
@@ -68,6 +72,69 @@ final class MenuBarController: NSObject {
         setupPanel()
         refreshScheduler?.triggerManualRefresh()
         scheduleRefreshTimer()
+
+        if showPanelOnLaunch {
+            showPanelForAutomation()
+        }
+    }
+
+    func stop() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        panel?.orderOut(nil)
+        panel = nil
+        hostingController = nil
+        if let statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+        }
+        statusItem = nil
+    }
+
+    func writePanelSnapshot(to url: URL) throws {
+        guard let view = hostingController?.view else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        try writeSnapshot(of: view, to: url)
+    }
+
+    func writeSettingsSnapshot(to url: URL) throws {
+        let hosting = NSHostingController(rootView: SettingsSheetView(viewModel: viewModel, onDismiss: {}))
+        let fittingSize = hosting.sizeThatFits(in: NSSize(width: 320, height: 360))
+        hosting.view.frame = NSRect(
+            origin: .zero,
+            size: NSSize(width: 320, height: max(fittingSize.height, 180))
+        )
+        try writeSnapshot(of: hosting.view, to: url)
+    }
+
+    func writeButtonInteractionSnapshot(to url: URL) throws {
+        let hosting = NSHostingController(
+            rootView: PTKButtonInteractionPreview()
+                .preferredColorScheme(viewModel.theme.preferredColorScheme)
+        )
+        let fittingSize = hosting.sizeThatFits(in: NSSize(width: 260, height: 120))
+        hosting.view.frame = NSRect(
+            origin: .zero,
+            size: NSSize(width: max(fittingSize.width, 200), height: max(fittingSize.height, 90))
+        )
+        try writeSnapshot(of: hosting.view, to: url)
+    }
+
+    private func writeSnapshot(of view: NSView, to url: URL) throws {
+        view.layoutSubtreeIfNeeded()
+        view.displayIfNeeded()
+        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        guard let data = bitmap.representation(using: .png, properties: [:]) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try data.write(to: url, options: .atomic)
     }
 
     private func makeViewModel() -> PortMonitorViewModel {
@@ -101,6 +168,7 @@ final class MenuBarController: NSObject {
         utilityPanel.backgroundColor = .clear
         utilityPanel.isOpaque = false
         utilityPanel.hasShadow = true
+        utilityPanel.sharingType = .readOnly
         utilityPanel.hidesOnDeactivate = true
         utilityPanel.isReleasedWhenClosed = false
         utilityPanel.level = .floating
@@ -129,6 +197,17 @@ final class MenuBarController: NSObject {
         let x = min(max(centeredX, visibleFrame.minX + 8), visibleFrame.maxX - panelSize.width - 8)
         let y = buttonFrame.minY - panelSize.height - 8
         panel.setFrameOrigin(NSPoint(x: x, y: max(y, visibleFrame.minY + 8)))
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func showPanelForAutomation() {
+        guard let panel else { return }
+        let visibleFrame = NSScreen.main?.visibleFrame ?? .zero
+        let panelSize = ContentView.panelSize
+        let x = visibleFrame.midX - panelSize.width / 2
+        let y = visibleFrame.midY - panelSize.height / 2
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

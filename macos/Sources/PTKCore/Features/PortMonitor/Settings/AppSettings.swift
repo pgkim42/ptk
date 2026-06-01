@@ -1,5 +1,19 @@
 import Foundation
 
+public enum AppTheme: String, CaseIterable, Equatable, Sendable {
+    case system
+    case light
+    case dark
+
+    public var label: String {
+        switch self {
+        case .system: "시스템"
+        case .light: "라이트"
+        case .dark: "다크"
+        }
+    }
+}
+
 public protocol SettingsStore: AnyObject {
     func string(forKey key: String) -> String?
     func set(_ value: String, forKey key: String)
@@ -58,6 +72,7 @@ public final class AppSettings {
     public enum Key {
         public static let watchedPortsExpression = "watchedPortsExpression"
         public static let refreshInterval = "refreshIntervalSeconds"
+        public static let theme = "theme"
     }
 
     private let store: SettingsStore
@@ -88,5 +103,16 @@ public final class AppSettings {
             return interval
         }
         set { store.set(newValue.rawValue, forKey: Key.refreshInterval) }
+    }
+
+    public var theme: AppTheme {
+        get {
+            guard let rawValue = store.string(forKey: Key.theme),
+                  let theme = AppTheme(rawValue: rawValue) else {
+                return .system
+            }
+            return theme
+        }
+        set { store.set(newValue.rawValue, forKey: Key.theme) }
     }
 }
