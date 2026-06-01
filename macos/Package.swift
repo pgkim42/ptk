@@ -8,13 +8,17 @@ let package = Package(
     ],
     products: [
         .library(name: "PTKCore", targets: ["PTKCore"]),
-        .executable(name: "PTK", targets: ["PTKApp"])
+        .executable(name: "PTK", targets: ["PTK"])
     ],
     targets: [
         .target(name: "PTKCore"),
-        .executableTarget(
+        .target(
             name: "PTKApp",
             dependencies: ["PTKCore"]
+        ),
+        .executableTarget(
+            name: "PTK",
+            dependencies: ["PTKApp"]
         ),
         .testTarget(
             name: "PTKCoreTests",

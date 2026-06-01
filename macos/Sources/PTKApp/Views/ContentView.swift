@@ -1,0 +1,286 @@
+import SwiftUI
+import PTKCore
+
+struct ContentView: View {
+    static let panelSize = NSSize(width: 352, height: 352)
+
+    @ObservedObject var viewModel: PortMonitorViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+
+            Divider().overlay(PTKTheme.border)
+
+            VStack(spacing: 10) {
+                if let errorMessage = viewModel.errorMessage {
+                    errorBanner(errorMessage)
+                }
+
+                portSection
+
+                if !viewModel.serviceStatuses.isEmpty {
+                    serviceSection
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .layoutPriority(1)
+
+            Divider().overlay(PTKTheme.border)
+
+            footer
+        }
+        .frame(width: Self.panelSize.width, height: Self.panelSize.height)
+        .foregroundStyle(PTKTheme.text)
+        .background {
+            ZStack {
+                PTKTheme.panel
+                LinearGradient(
+                    colors: [PTKTheme.panelTop, PTKTheme.panel],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(PTKTheme.border, lineWidth: 1)
+        }
+        .alert(
+            "프로세스를 종료할까요?",
+            isPresented: .init(
+                get: { viewModel.killConfirmationTarget != nil },
+                set: { if !$0 { viewModel.cancelKill() } }
+            ),
+            presenting: viewModel.killConfirmationTarget
+        ) { target in
+            Button("종료", role: .destructive) {
+                viewModel.confirmKill()
+            }
+            Button("취소", role: .cancel) {
+                viewModel.cancelKill()
+            }
+        } message: { target in
+            Text("Port \(target.port), PID \(target.pid), \(target.processName)를 종료합니다.")
+        }
+        .alert(
+            "종료 실패",
+            isPresented: .init(
+                get: { viewModel.killErrorMessage != nil },
+                set: { if !$0 { viewModel.killErrorMessage = nil } }
+            ),
+            presenting: viewModel.killErrorMessage
+        ) { message in
+            Button("확인") {
+                viewModel.killErrorMessage = nil
+            }
+        } message: { message in
+            Text(message)
+        }
+        .sheet(isPresented: $viewModel.isShowingSettings) {
+            SettingsSheetView(viewModel: viewModel) {
+                viewModel.isShowingSettings = false
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Text("PTK")
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .lineLimit(1)
+
+            Text("Port Toolkit")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(PTKTheme.muted)
+                .lineLimit(1)
+
+            Spacer()
+
+            Text("\(viewModel.openPorts.count) OPEN")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(viewModel.openPorts.isEmpty ? PTKTheme.faint : PTKTheme.green)
+                .lineLimit(1)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(viewModel.openPorts.isEmpty ? PTKTheme.card : PTKTheme.green.opacity(0.14)))
+                .overlay {
+                    Capsule().strokeBorder(viewModel.openPorts.isEmpty ? PTKTheme.border : PTKTheme.green.opacity(0.22), lineWidth: 1)
+                }
+
+            iconButton("arrow.clockwise", help: "새로고침") {
+                viewModel.refresh()
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+        .layoutPriority(2)
+    }
+
+    private var portSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Open Ports", trailing: watchedPortsSummary)
+
+            if viewModel.openPorts.isEmpty {
+                EmptyPortsView()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(viewModel.openPorts, id: \.port) { status in
+                            PortRowView(status: status) { target in
+                                viewModel.requestKill(target)
+                            }
+                        }
+                    }
+                }
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(PTKTheme.table))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(PTKTheme.border, lineWidth: 1)
+                }
+                .frame(maxHeight: viewModel.serviceStatuses.isEmpty ? 202 : 112)
+            }
+        }
+    }
+
+    private var serviceSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Services", trailing: serviceSummary)
+
+            VStack(spacing: 0) {
+                ForEach(viewModel.serviceStatuses, id: \.name) { status in
+                    ServiceStatusRowView(status: status)
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(PTKTheme.table))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(PTKTheme.border, lineWidth: 1)
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 8) {
+            Text(viewModel.refreshInterval.label)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(PTKTheme.muted)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(PTKTheme.card))
+
+            Spacer()
+
+            iconButton("gearshape", help: "설정") {
+                viewModel.isShowingSettings = true
+            }
+
+            iconButton("power", help: "종료") {
+                NSApplication.shared.terminate(nil)
+            }
+            .foregroundStyle(PTKTheme.muted)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .layoutPriority(2)
+    }
+
+    private func sectionHeader(_ title: String, trailing: String? = nil) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(PTKTheme.faint)
+                .lineLimit(1)
+
+            Spacer()
+
+            if let trailing {
+                Text(trailing)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(PTKTheme.faint)
+                    .lineLimit(1)
+            }
+        }
+        .frame(height: 12)
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(PTKTheme.orange)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(PTKTheme.text)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .padding(9)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(PTKTheme.orange.opacity(0.12)))
+    }
+
+    private var watchedPortsSummary: String {
+        "\(viewModel.openPorts.count)/\(viewModel.statuses.count)"
+    }
+
+    private var serviceSummary: String {
+        let runningCount = viewModel.serviceStatuses.filter { $0.state == .running }.count
+        return "\(runningCount)/\(viewModel.serviceStatuses.count)"
+    }
+
+    private func iconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .foregroundStyle(PTKTheme.muted)
+    }
+}
+
+private struct EmptyPortsView: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.seal")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(PTKTheme.green)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("열린 감시 포트 없음")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(PTKTheme.text)
+                Text("감시 중인 개발 포트가 조용합니다.")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(PTKTheme.muted)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 54)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(PTKTheme.table))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(PTKTheme.border, lineWidth: 1)
+        }
+    }
+}
+
+enum PTKTheme {
+    static let panel = Color(red: 0.07, green: 0.08, blue: 0.10)
+    static let panelTop = Color(red: 0.12, green: 0.13, blue: 0.16)
+    static let table = Color.white.opacity(0.048)
+    static let card = Color.white.opacity(0.06)
+    static let border = Color.white.opacity(0.075)
+    static let text = Color.white.opacity(0.92)
+    static let muted = Color.white.opacity(0.58)
+    static let faint = Color.white.opacity(0.42)
+    static let green = Color(red: 0.32, green: 0.86, blue: 0.50)
+    static let red = Color(red: 0.92, green: 0.34, blue: 0.36)
+    static let orange = Color(red: 1.00, green: 0.68, blue: 0.28)
+}
