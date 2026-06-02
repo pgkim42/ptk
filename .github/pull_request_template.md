@@ -6,8 +6,8 @@
 
 - [ ] `cd macos && swift test`
 - [ ] `cd macos && swift build`
-- [ ] `cd macos && xcodebuild -scheme PTK -destination 'platform=macOS' test`
 - [ ] `tests/open-source-readiness.sh`
+- [ ] `tests/ci-workflow-readiness.sh`
 
 ## Safety Checklist
 

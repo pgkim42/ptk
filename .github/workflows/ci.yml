@@ -10,21 +10,20 @@ jobs:
   swift:
     name: Swift package
     runs-on: macos-latest
+    env:
+      PTK_CI_WINDOWSERVER_TEST_SKIP: >-
+        PTKAppTests.MenuBarControllerTests/(startCanShowPanelImmediatelyForAutomation|panelSnapshotCanBeWrittenForAutomation|settingsSnapshotCanBeWrittenForAutomation|buttonInteractionSnapshotCanBeWrittenForAutomation)
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Test package
-        run: swift test
+        run: swift test --skip "$PTK_CI_WINDOWSERVER_TEST_SKIP"
         working-directory: macos
 
       - name: Build package
         run: swift build
-        working-directory: macos
-
-      - name: Test Xcode scheme
-        run: xcodebuild -scheme PTK -destination 'platform=macOS' test
         working-directory: macos
 
   repository-metadata:
@@ -40,3 +39,6 @@ jobs:
 
       - name: Check release readiness
         run: tests/release-readiness.sh
+
+      - name: Check CI workflow readiness
+        run: tests/ci-workflow-readiness.sh

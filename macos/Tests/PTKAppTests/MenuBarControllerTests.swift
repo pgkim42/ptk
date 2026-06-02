@@ -4,7 +4,7 @@ import Testing
 @testable import PTKCore
 
 @MainActor
-@Suite struct MenuBarControllerTests {
+@Suite(.serialized) struct MenuBarControllerTests {
     @Test func refreshStartsServiceStatusLoadWithoutWaitingForCompletion() {
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.watchedPortsExpression = "3000"

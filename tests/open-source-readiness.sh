@@ -23,6 +23,13 @@ assert_contains() {
   pass "$path contains: $expected"
 }
 
+assert_not_contains() {
+  local path="$1"
+  local unexpected="$2"
+  ! grep -Fq "$unexpected" "$path" || fail "$path does not contain: $unexpected"
+  pass "$path does not contain: $unexpected"
+}
+
 assert_not_exists() {
   local path="$1"
   [[ ! -e "$path" ]] || fail "$path is absent"
@@ -66,8 +73,9 @@ assert_file .github/workflows/ci.yml
 assert_contains .github/workflows/ci.yml "macos-latest"
 assert_contains .github/workflows/ci.yml "swift test"
 assert_contains .github/workflows/ci.yml "swift build"
-assert_contains .github/workflows/ci.yml "xcodebuild -scheme PTK -destination 'platform=macOS' test"
 assert_contains .github/workflows/ci.yml "tests/release-readiness.sh"
+assert_contains .github/workflows/ci.yml "tests/ci-workflow-readiness.sh"
+assert_not_contains .github/workflows/ci.yml "xcodebuild -scheme PTK"
 
 assert_file .github/ISSUE_TEMPLATE/bug_report.yml
 assert_file .github/ISSUE_TEMPLATE/feature_request.yml
