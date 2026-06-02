@@ -51,7 +51,9 @@ assert_contains README.md "A native macOS menu bar utility for safely inspecting
 assert_contains README.md "![PTK menu bar panel](docs/assets/ptk-panel.png)"
 assert_contains README.md "## Why PTK?"
 assert_contains README.md "## Project Health"
-assert_contains README.md "Installer packaging is planned for v0.1.0"
+assert_contains README.md "PTK-macos-0.1.0-unsigned.dmg"
+assert_contains README.md "This release is unsigned"
+assert_contains README.md "PTK does not include automatic updates yet"
 assert_contains README.ko.md "SPDX-License-Identifier: 0BSD"
 assert_contains README.ko.md "CONTRIBUTING.md"
 assert_contains README.ko.md "SECURITY.md"
@@ -62,7 +64,9 @@ assert_contains README.ko.md "로컬 개발 포트를 안전하게 확인하고 
 assert_contains README.ko.md "![PTK 메뉴 막대 패널](docs/assets/ptk-panel.png)"
 assert_contains README.ko.md "## 왜 PTK인가?"
 assert_contains README.ko.md "## 프로젝트 상태"
-assert_contains README.ko.md "설치 패키지는 v0.1.0에서 준비할 예정"
+assert_contains README.ko.md "PTK-macos-0.1.0-unsigned.dmg"
+assert_contains README.ko.md "현재 릴리스는 서명되지 않았습니다"
+assert_contains README.ko.md "아직 자동 업데이트를 포함하지 않습니다"
 assert_file docs/assets/ptk-panel.png
 assert_file docs/assets/ptk-settings.png
 
@@ -102,6 +106,8 @@ assert_contains .github/pull_request_template.md "Process termination safety"
 assert_contains .github/pull_request_template.md "Swift-only runtime boundary"
 
 assert_contains .gitignore ".codegraph/"
+assert_contains .gitignore "dist/"
+assert_contains tests/package-readiness.sh "package-readiness"
 assert_not_exists package.json
 assert_not_exists package-lock.json
 assert_not_exists src-tauri

@@ -36,12 +36,13 @@ tool stays trustworthy as it grows.
 - Runtime: Swift, AppKit, SwiftUI
 - Entry point: `macos/`
 - UI surface: menu bar status item with a compact utility panel
-- Distribution: local development build only for now
+- Distribution: unsigned manual release artifacts for GitHub Releases
 - Scope: personal tool, maintained as a public open-source repository
 - License: `0BSD` (`SPDX-License-Identifier: 0BSD`)
 
-Installer packaging is planned for v0.1.0. Until then, PTK is a developer-run
-Swift Package app.
+PTK is distributed as unsigned manual release artifacts for now. It does not
+use paid Developer ID signing, notarization, App Store distribution, Sparkle, or
+an update server yet.
 
 ## Project Health
 
@@ -155,9 +156,35 @@ When changing the default profile, keep these files in sync:
 - `macos/Sources/PTKCore/Features/PortMonitor/Domain/AppDefaults.swift`
 - related tests under `macos/Tests/PTKCoreTests/Features/PortMonitor/`
 
-## Run
+## Install
 
-PTK is not packaged as an installer yet. Run it from the Swift package:
+Download `PTK-macos-0.1.0-unsigned.dmg` from GitHub Releases.
+
+1. Open the DMG.
+2. Drag `PTK.app` to `Applications`.
+3. Open `Applications`.
+4. Right-click PTK.app and choose **Open**.
+5. Confirm **Open** when macOS shows the unsigned app warning.
+
+This release is unsigned. macOS may block the first launch because it cannot
+verify the developer. The right-click **Open** flow is required only when
+Gatekeeper blocks the normal double-click launch.
+
+PTK appears in the macOS menu bar after launch instead of opening a normal app
+window.
+
+PTK also publishes `PTK-macos-0.1.0-unsigned.zip` for users who prefer a plain
+archive. Unzip it, move `PTK.app` to `/Applications`, then use the same first
+launch flow.
+
+### Manual Updates
+
+PTK does not include automatic updates yet. To update, download the latest
+GitHub Release, quit PTK, and replace the app manually in `/Applications`.
+
+## Run From Source
+
+Developers can still run PTK from the Swift package:
 
 ```bash
 cd macos
@@ -192,6 +219,7 @@ Release preparation and project management checks can be run with:
 
 ```bash
 tests/release-readiness.sh
+tests/package-readiness.sh
 tests/github-management-readiness.sh
 ```
 

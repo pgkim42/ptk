@@ -5,6 +5,7 @@ macos/.build/
 macos/.swiftpm/
 DerivedData/
 *.xcuserstate
+dist/
 
 # Optional editor/OS noise
 .DS_Store

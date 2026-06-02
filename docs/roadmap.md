@@ -7,7 +7,8 @@ maintainable open-source project shape over broad feature count.
 
 Goal: ship the first public Swift-only macOS menu bar release.
 
-- Release packaging: produce a downloadable `.app` bundle or release zip.
+- Release packaging: Unsigned DMG and ZIP release artifacts.
+  (implemented in development)
 - Add a README screenshot or short demo GIF.
 - Prepare release notes with the exact verification commands.
 - Confirm CI covers Swift tests, Swift build, Xcode scheme tests, and repository

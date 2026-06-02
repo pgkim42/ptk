@@ -36,12 +36,12 @@ fail-closed 안전 모델 뒤에 둡니다.
 - 런타임: Swift, AppKit, SwiftUI
 - 진입점: `macos/`
 - UI: 메뉴 막대 상태 항목과 compact utility panel
-- 배포: 아직 설치 패키지 없음, 개발 빌드로 실행
+- 배포: GitHub Releases용 unsigned 수동 배포 산출물
 - 저장소 성격: 개인용 도구이지만 공개 오픈소스 저장소 기준으로 관리
 - 라이선스: `0BSD` (`SPDX-License-Identifier: 0BSD`)
 
-설치 패키지는 v0.1.0에서 준비할 예정입니다. 그 전까지 PTK는 개발자가
-Swift Package에서 직접 실행하는 앱입니다.
+현재 릴리스는 서명되지 않았습니다. PTK는 아직 유료 Developer ID 서명,
+notarization, App Store 배포, Sparkle, 업데이트 서버를 사용하지 않습니다.
 
 ## 프로젝트 상태
 
@@ -153,9 +153,34 @@ PTK는 `SIGTERM`만 보냅니다. force kill, mismatch override, 모호한 liste
 - `macos/Sources/PTKCore/Features/PortMonitor/Domain/AppDefaults.swift`
 - `macos/Tests/PTKCoreTests/Features/PortMonitor/` 아래 관련 테스트
 
-## 실행
+## 설치
 
-아직 설치 패키지는 없습니다. Swift Package에서 직접 실행합니다.
+GitHub Releases에서 `PTK-macos-0.1.0-unsigned.dmg`를 다운로드합니다.
+
+1. DMG를 엽니다.
+2. `PTK.app`을 `Applications`로 드래그합니다.
+3. `Applications`를 엽니다.
+4. PTK.app을 우클릭하고 **열기**를 선택합니다.
+5. macOS가 unsigned 앱 경고를 표시하면 다시 **열기**를 확인합니다.
+
+현재 릴리스는 서명되지 않았습니다. macOS가 개발자를 확인할 수 없다는
+이유로 첫 실행을 차단할 수 있습니다. 일반 더블클릭 실행이 막힐 때만
+우클릭 **열기** 흐름이 필요합니다.
+
+실행 후 PTK는 일반 앱 창 대신 macOS 메뉴 막대에 표시됩니다.
+
+압축 파일을 선호하는 사용자를 위해 `PTK-macos-0.1.0-unsigned.zip`도
+제공합니다. 압축을 풀고 `PTK.app`을 `/Applications`로 옮긴 뒤 같은 첫
+실행 흐름을 사용하면 됩니다.
+
+### 수동 업데이트
+
+PTK는 아직 자동 업데이트를 포함하지 않습니다. 업데이트하려면 최신 GitHub
+Release를 다운로드하고 PTK를 종료한 뒤, `/Applications`의 앱을 수동으로 교체합니다.
+
+## 소스에서 실행
+
+개발자는 Swift Package에서 직접 실행할 수 있습니다.
 
 ```bash
 cd macos
@@ -190,6 +215,7 @@ tests/open-source-readiness.sh
 
 ```bash
 tests/release-readiness.sh
+tests/package-readiness.sh
 tests/github-management-readiness.sh
 ```
 

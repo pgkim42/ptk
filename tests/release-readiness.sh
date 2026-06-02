@@ -32,13 +32,19 @@ assert_file docs/roadmap.md
 assert_contains docs/roadmap.md "## v0.1.0"
 assert_contains docs/roadmap.md "## v0.2.0"
 assert_contains docs/roadmap.md "Release packaging"
+assert_contains docs/roadmap.md "Unsigned DMG and ZIP release artifacts"
 assert_contains docs/roadmap.md "Manual refresh"
 assert_contains docs/roadmap.md "Out of scope"
 assert_contains docs/roadmap.md "force kill"
 
 assert_contains README.md "CHANGELOG.md"
 assert_contains README.md "docs/roadmap.md"
+assert_contains README.md "PTK-macos-0.1.0-unsigned.dmg"
 assert_contains README.ko.md "CHANGELOG.md"
 assert_contains README.ko.md "docs/roadmap.md"
+assert_contains README.ko.md "PTK-macos-0.1.0-unsigned.dmg"
+assert_contains tests/package-readiness.sh "package-readiness"
+
+tests/package-readiness.sh
 
 pass "release-readiness"
