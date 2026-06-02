@@ -32,6 +32,8 @@ assert_not_contains() {
 
 assert_file .github/workflows/ci.yml
 assert_contains .github/workflows/ci.yml "macos-latest"
+assert_contains .github/workflows/ci.yml "uses: actions/checkout@v6.0.2"
+assert_not_contains .github/workflows/ci.yml "uses: actions/checkout@v4"
 assert_contains .github/workflows/ci.yml "swift test"
 assert_contains .github/workflows/ci.yml "swift build"
 assert_contains .github/workflows/ci.yml "PTK_CI_WINDOWSERVER_TEST_SKIP"
