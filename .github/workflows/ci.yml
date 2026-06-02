@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  swift:
+    name: Swift package
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Test package
+        run: swift test
+        working-directory: macos
+
+      - name: Build package
+        run: swift build
+        working-directory: macos
+
+      - name: Test Xcode scheme
+        run: xcodebuild -scheme PTK -destination 'platform=macOS' test
+        working-directory: macos
+
+  repository-metadata:
+    name: Repository metadata
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check open-source readiness
+        run: tests/open-source-readiness.sh
+
+      - name: Check release readiness
+        run: tests/release-readiness.sh

@@ -2,6 +2,9 @@
 
 [English README](README.md)
 
+![CI](https://github.com/pgkim42/ptk/actions/workflows/ci.yml/badge.svg)
+![License: 0BSD](https://img.shields.io/badge/license-0BSD-blue.svg)
+
 PTK는 로컬 개발 환경을 빠르게 읽고 정리하기 위한 native macOS 메뉴 막대 유틸리티입니다.
 
 현재 첫 번째 도구는 **로컬 개발 포트 모니터**입니다. 설정한 포트 범위를 감시하고, 열려 있는 개발 서버와 관련 프로세스를 보여주며, 안전하게 확인된 프로세스만 종료할 수 있게 합니다.
@@ -15,7 +18,8 @@ PTK는 로컬 개발 환경을 빠르게 읽고 정리하기 위한 native macOS
 - 진입점: `macos/`
 - UI: 메뉴 막대 상태 항목과 compact utility panel
 - 배포: 아직 설치 패키지 없음, 개발 빌드로 실행
-- 저장소 성격: 개인용 도구이지만 공개 저장소 기준으로 관리
+- 저장소 성격: 개인용 도구이지만 공개 오픈소스 저장소 기준으로 관리
+- 라이선스: `0BSD` (`SPDX-License-Identifier: 0BSD`)
 
 ## 기능
 
@@ -125,6 +129,31 @@ Xcode scheme 테스트:
 cd macos && xcodebuild -scheme PTK -destination 'platform=macOS' test
 ```
 
+저장소 메타데이터는 다음 명령으로 확인합니다.
+
+```bash
+tests/open-source-readiness.sh
+```
+
+릴리스 준비와 프로젝트 관리 상태는 다음 명령으로 확인합니다.
+
+```bash
+tests/release-readiness.sh
+tests/github-management-readiness.sh
+```
+
+릴리스 노트는 `CHANGELOG.md`, 현재 로드맵은 `docs/roadmap.md`를
+확인하세요.
+
+## 기여
+
+기여 기준, 검증 명령, 프로젝트 안전 경계는 `CONTRIBUTING.md`를
+참고합니다.
+
+버그 제보와 기능 제안은 GitHub issues를 사용합니다. 개인 머신 정보가
+포함되는 보안성 제보는 `SECURITY.md`를 따르고, secret은 공개 issue에
+올리지 않습니다.
+
 ## 프로젝트 구조
 
 ```text
@@ -206,4 +235,5 @@ macos/
 
 ## 라이선스
 
-아직 라이선스 파일이 없습니다. 외부에서 재사용 가능한 오픈소스로 다루려면 `LICENSE`를 추가해야 합니다.
+PTK는 `0BSD` 라이선스로 배포합니다. 자세한 내용은 `LICENSE`를
+확인하세요.

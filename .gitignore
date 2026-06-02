@@ -13,3 +13,4 @@ Thumbs.db
 # Codex / OMO local state
 .omo/
 .omx/
+.codegraph/

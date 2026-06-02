@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest a small PTK improvement.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        PTK is intentionally small and native. Requests that add process
+        termination risk or service orchestration need a safety rationale.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What local development workflow should this improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - "Port monitor"
+        - "Service status"
+        - "Settings"
+        - "Menu bar app shell"
+        - "Documentation"
+        - "Other"
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Boundaries
+      options:
+        - label: This keeps PTK Swift-only.
+        - label: This keeps process termination fail-closed.
+        - label: This keeps service status read-only.

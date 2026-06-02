@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a PTK behavior that does not work as expected.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a PTK issue. Do not include secrets, private keys,
+        tokens, passwords, or personal machine data.
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: "13.6, 14.5, 15.0"
+    validations:
+      required: true
+  - type: input
+    id: ptk-version
+    attributes:
+      label: PTK version or commit
+      placeholder: "main@abcdef0"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include the watched port expression if relevant.
+    validations:
+      required: true
+  - type: dropdown
+    id: termination
+    attributes:
+      label: Did this involve process termination?
+      options:
+        - "No"
+        - "Yes, a kill action was shown"
+        - "Yes, a kill action was blocked"
+        - "Yes, a process was terminated"
+    validations:
+      required: true

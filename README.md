@@ -2,6 +2,9 @@
 
 [한국어 README](README.ko.md)
 
+![CI](https://github.com/pgkim42/ptk/actions/workflows/ci.yml/badge.svg)
+![License: 0BSD](https://img.shields.io/badge/license-0BSD-blue.svg)
+
 PTK is a native macOS menu bar utility for keeping a local development machine readable and under control.
 
 The first tool in PTK is a **local port monitor**. It watches a configurable set of development ports, shows which ones are currently listening, identifies the owning process when possible, and lets you terminate only the processes that can be verified safely.
@@ -15,7 +18,8 @@ PTK is currently a Swift-only macOS app. The old Rust/Tauri/Node runtime has bee
 - Entry point: `macos/`
 - UI surface: menu bar status item with a compact utility panel
 - Distribution: local development build only for now
-- Scope: personal tool, maintained as a public repository
+- Scope: personal tool, maintained as a public open-source repository
+- License: `0BSD` (`SPDX-License-Identifier: 0BSD`)
 
 ## What It Does
 
@@ -125,6 +129,30 @@ For the Xcode scheme test path:
 cd macos && xcodebuild -scheme PTK -destination 'platform=macOS' test
 ```
 
+Repository metadata can be checked with:
+
+```bash
+tests/open-source-readiness.sh
+```
+
+Release preparation and project management checks can be run with:
+
+```bash
+tests/release-readiness.sh
+tests/github-management-readiness.sh
+```
+
+See `CHANGELOG.md` for release notes and `docs/roadmap.md` for the current
+release roadmap.
+
+## Contributing
+
+See `CONTRIBUTING.md` for contribution guidelines, verification commands, and
+the project safety boundaries.
+
+Use GitHub issues for bug reports and feature requests. If a report includes
+private machine details, follow `SECURITY.md` and do not post secrets publicly.
+
 ## Project Layout
 
 ```text
@@ -206,4 +234,4 @@ This repository is intended to remain safe for public use.
 
 ## License
 
-No license file has been added yet. Add a `LICENSE` before treating PTK as reusable open-source software.
+PTK is distributed under the `0BSD` license. See `LICENSE`.
