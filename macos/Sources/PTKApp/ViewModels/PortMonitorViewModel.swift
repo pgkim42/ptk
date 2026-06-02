@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import PTKCore
 
@@ -30,13 +31,17 @@ final class PortMonitorViewModel: ObservableObject {
     private let parser: PortRangeParser
     private let onRefresh: () -> Void
     private let onIntervalChange: (RefreshInterval) -> Void
+    private let onOpenLocalhost: (URL) -> Void
+    private let onCopyText: (String) -> Void
 
     init(
         settings: AppSettings,
         killService: KillService = KillService(),
         parser: PortRangeParser = PortRangeParser(),
         onRefresh: @escaping () -> Void,
-        onIntervalChange: @escaping (RefreshInterval) -> Void = { _ in }
+        onIntervalChange: @escaping (RefreshInterval) -> Void = { _ in },
+        onOpenLocalhost: @escaping (URL) -> Void = { _ in },
+        onCopyText: @escaping (String) -> Void = { _ in }
     ) {
         self.settings = settings
         self.killService = killService
@@ -46,6 +51,12 @@ final class PortMonitorViewModel: ObservableObject {
         self.theme = settings.theme
         self.onRefresh = onRefresh
         self.onIntervalChange = onIntervalChange
+        self.onOpenLocalhost = onOpenLocalhost
+        self.onCopyText = onCopyText
+    }
+
+    var portPresets: [PortPreset] {
+        AppDefaults.portPresets
     }
 
     func refresh() {
@@ -78,6 +89,10 @@ final class PortMonitorViewModel: ObservableObject {
         onRefresh()
     }
 
+    func applyPreset(_ preset: PortPreset) throws {
+        try saveExpression(preset.expression)
+    }
+
     func saveInterval(_ interval: RefreshInterval) {
         settings.refreshInterval = interval
         refreshInterval = interval
@@ -87,5 +102,36 @@ final class PortMonitorViewModel: ObservableObject {
     func saveTheme(_ theme: AppTheme) {
         settings.theme = theme
         self.theme = theme
+    }
+
+    func openLocalhost(for status: PortStatus) {
+        onOpenLocalhost(localhostURL(for: status.port))
+    }
+
+    func copyLocalhostURL(for status: PortStatus) {
+        onCopyText(localhostURL(for: status.port).absoluteString)
+    }
+
+    func copyOpenPortsSummary() {
+        guard !openPorts.isEmpty else {
+            onCopyText("No open watched ports")
+            return
+        }
+
+        let summary = openPorts.map { status in
+            var parts = ["\(status.port)"]
+            if let processName = status.processName, !processName.isEmpty {
+                parts.append(processName)
+            }
+            if let pid = status.pid {
+                parts.append("PID \(pid)")
+            }
+            return parts.joined(separator: " ")
+        }.joined(separator: "\n")
+        onCopyText(summary)
+    }
+
+    private func localhostURL(for port: UInt16) -> URL {
+        URL(string: "http://localhost:\(port)")!
     }
 }

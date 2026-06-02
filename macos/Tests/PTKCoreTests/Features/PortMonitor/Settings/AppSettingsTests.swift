@@ -36,6 +36,19 @@ import Testing
         #expect(AppTheme.allCases.map(\.label) == ["시스템", "라이트", "다크"])
     }
 
+    @Test func portPresetsExposeValidatedProfiles() throws {
+        let parser = PortRangeParser()
+
+        #expect(AppDefaults.portPresets.map(\.id) == ["full-stack", "frontend", "api", "data"])
+        #expect(AppDefaults.portPresets.map(\.title) == ["Full Stack", "Frontend", "API", "Data"])
+        #expect(AppDefaults.portPresets.first?.expression == AppDefaults.defaultWatchedPortsExpression)
+
+        for preset in AppDefaults.portPresets {
+            let ports = try parser.parse(preset.expression)
+            #expect(!ports.isEmpty)
+        }
+    }
+
     @Test func validatedWatchedPortsUpdatePersistsValidExpression() throws {
         let store = InMemorySettingsStore()
         let settings = AppSettings(store: store)

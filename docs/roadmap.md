@@ -20,8 +20,10 @@ Goal: ship the first public Swift-only macOS menu bar release.
 Goal: improve day-to-day local development ergonomics without expanding PTK
 into a service orchestrator.
 
-- Manual refresh action in the menu bar panel.
-- Watched-port presets for common development stacks.
+- Manual refresh action in the menu bar panel. (implemented in development)
+- Watched-port presets for common development stacks. (implemented in development)
+- Quick actions to open or copy localhost URLs and open-port summaries.
+  (implemented in development)
 - Better process details for verified listeners, such as copyable PID or
   command text when safe to show.
 - Small menu bar polish for empty, warning, and error states.

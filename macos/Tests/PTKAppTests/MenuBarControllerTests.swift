@@ -237,11 +237,58 @@ import Testing
         #expect(viewModel.theme == .light)
         #expect(reloaded.theme == .light)
     }
+
+    @Test func applyPresetPersistsExpressionAndRefreshes() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+        var refreshCount = 0
+        let viewModel = makeViewModel(
+            settings: settings,
+            onRefresh: {
+                refreshCount += 1
+            }
+        )
+
+        try viewModel.applyPreset(AppDefaults.portPresets[1])
+
+        let reloaded = AppSettings(store: store)
+        #expect(viewModel.portExpression == "3000-3009,5173-5182")
+        #expect(reloaded.watchedPortsExpression == "3000-3009,5173-5182")
+        #expect(refreshCount == 1)
+    }
+
+    @Test func quickActionsForwardOpenAndCopyRequests() {
+        var openedURL: URL?
+        var copiedText: String?
+        let viewModel = makeViewModel(
+            onOpenLocalhost: { url in
+                openedURL = url
+            },
+            onCopyText: { text in
+                copiedText = text
+            }
+        )
+        let status = PortStatus(port: 5173, isOpen: true, pid: 42, processName: "vite")
+        viewModel.statuses = [status]
+
+        viewModel.openLocalhost(for: status)
+        #expect(openedURL?.absoluteString == "http://localhost:5173")
+
+        viewModel.copyLocalhostURL(for: status)
+        #expect(copiedText == "http://localhost:5173")
+
+        viewModel.copyOpenPortsSummary()
+        #expect(copiedText?.contains("5173") == true)
+        #expect(copiedText?.contains("vite") == true)
+    }
 }
 
 @MainActor private func makeViewModel(
     settings: AppSettings = AppSettings(store: InMemorySettingsStore()),
-    onIntervalChange: @escaping (RefreshInterval) -> Void = { _ in }
+    onRefresh: @escaping () -> Void = {},
+    onIntervalChange: @escaping (RefreshInterval) -> Void = { _ in },
+    onOpenLocalhost: @escaping (URL) -> Void = { _ in },
+    onCopyText: @escaping (String) -> Void = { _ in }
 ) -> PortMonitorViewModel {
     PortMonitorViewModel(
         settings: settings,
@@ -250,8 +297,10 @@ import Testing
             terminator: FakeProcessTerminator()
         ),
         parser: PortRangeParser(),
-        onRefresh: {},
-        onIntervalChange: onIntervalChange
+        onRefresh: onRefresh,
+        onIntervalChange: onIntervalChange,
+        onOpenLocalhost: onOpenLocalhost,
+        onCopyText: onCopyText
     )
 }
 

@@ -1,15 +1,34 @@
 # PTK
 
-[한국어 README](README.ko.md)
+A native macOS menu bar utility for safely inspecting and cleaning local development ports.
 
 ![CI](https://github.com/pgkim42/ptk/actions/workflows/ci.yml/badge.svg)
 ![License: 0BSD](https://img.shields.io/badge/license-0BSD-blue.svg)
 
-PTK is a native macOS menu bar utility for keeping a local development machine readable and under control.
+[한국어 README](README.ko.md)
+
+![PTK menu bar panel](docs/assets/ptk-panel.png)
+
+PTK keeps a local development machine readable without turning into a service
+orchestrator. It watches common development ports, shows the verified listener
+details it can safely identify, and keeps destructive process termination behind
+a fail-closed safety model.
 
 The first tool in PTK is a **local port monitor**. It watches a configurable set of development ports, shows which ones are currently listening, identifies the owning process when possible, and lets you terminate only the processes that can be verified safely.
 
 PTK is currently a Swift-only macOS app. The old Rust/Tauri/Node runtime has been removed from the active product path; the app now builds and runs from the Swift Package under `macos/`.
+
+## Why PTK?
+
+Local development often leaves behind ports that are hard to reason about:
+Next.js, Vite, backend servers, database services, and old test processes can
+all compete for the same machine. Killing the wrong PID is worse than leaving a
+port alone, so PTK prefers a small native surface that makes the current state
+obvious and only enables process termination when the target can be revalidated.
+
+The project is intentionally narrow: inspect local development ports, expose the
+common cleanup action, and document the safety boundary clearly enough that the
+tool stays trustworthy as it grows.
 
 ## Status
 
@@ -20,6 +39,21 @@ PTK is currently a Swift-only macOS app. The old Rust/Tauri/Node runtime has bee
 - Distribution: local development build only for now
 - Scope: personal tool, maintained as a public open-source repository
 - License: `0BSD` (`SPDX-License-Identifier: 0BSD`)
+
+Installer packaging is planned for v0.1.0. Until then, PTK is a developer-run
+Swift Package app.
+
+## Project Health
+
+- CI runs Swift package tests, Swift build, release readiness, and repository
+  readiness checks.
+- `CONTRIBUTING.md` documents verification commands and the process-termination
+  safety boundary.
+- `SECURITY.md` covers private reporting and safe handling of machine-specific
+  details.
+- `docs/roadmap.md` tracks the current v0.1.0 and v0.2.0 work.
+- The app runtime is Swift-only; Rust, Tauri, Node, and separate CLI runtimes
+  are intentionally kept out of the active product path.
 
 ## What It Does
 
@@ -35,6 +69,7 @@ The panel can show:
 - open port number
 - PID, when exactly one listener can be identified
 - process name, when available
+- quick actions for opening or copying a localhost URL
 - kill action only when the target is safe
 - parse or lookup errors without hiding the rest of the panel
 
@@ -70,13 +105,31 @@ PTK sends `SIGTERM` only. It does not provide force kill, mismatch override, or 
 
 ### Settings
 
+![PTK settings sheet](docs/assets/ptk-settings.png)
+
 The settings sheet supports:
 
 - watched port expression editing
+- port presets for common local development stacks
 - validation before saving
 - refresh interval selection: `1s`, `3s`, `5s`, `10s`
 - theme selection: system, light, dark
 - persistence through `UserDefaults`
+
+### Port Presets and Quick Actions
+
+The settings sheet includes validated port presets:
+
+| Preset | Expression |
+| --- | --- |
+| Full Stack | `3000-3009,5173-5182,4200-4209,8080-8089` |
+| Frontend | `3000-3009,5173-5182` |
+| API | `8000-8009,8080-8089` |
+| Data | `3306,5432,6379,27017` |
+
+Open port rows include quick actions to open `http://localhost:<port>` in the
+browser or copy that localhost URL. The footer can copy a compact summary of
+currently open watched ports.
 
 ## Default Watched Ports
 

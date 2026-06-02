@@ -1,15 +1,34 @@
 # PTK
 
-[English README](README.md)
+로컬 개발 포트를 안전하게 확인하고 정리하는 native macOS 메뉴 막대 유틸리티입니다.
 
 ![CI](https://github.com/pgkim42/ptk/actions/workflows/ci.yml/badge.svg)
 ![License: 0BSD](https://img.shields.io/badge/license-0BSD-blue.svg)
 
-PTK는 로컬 개발 환경을 빠르게 읽고 정리하기 위한 native macOS 메뉴 막대 유틸리티입니다.
+[English README](README.md)
+
+![PTK 메뉴 막대 패널](docs/assets/ptk-panel.png)
+
+PTK는 로컬 개발 환경을 읽기 쉽게 유지하되, 서비스 오케스트레이터로
+커지지 않는 도구를 지향합니다. 흔한 개발 포트를 감시하고, 안전하게
+확인할 수 있는 listener 정보를 보여주며, 파괴적인 프로세스 종료는
+fail-closed 안전 모델 뒤에 둡니다.
 
 현재 첫 번째 도구는 **로컬 개발 포트 모니터**입니다. 설정한 포트 범위를 감시하고, 열려 있는 개발 서버와 관련 프로세스를 보여주며, 안전하게 확인된 프로세스만 종료할 수 있게 합니다.
 
 현재 PTK는 Swift 전용 macOS 앱입니다. 이전 Rust/Tauri/Node 런타임은 활성 제품 경로에서 제거했으며, 앱은 `macos/` 아래 Swift Package 하나로 빌드하고 실행합니다.
+
+## 왜 PTK인가?
+
+로컬 개발 환경에서는 Next.js, Vite, 백엔드 서버, DB 서비스, 오래된 테스트
+프로세스가 같은 머신에서 쉽게 얽힙니다. 잘못된 PID를 종료하는 것은 포트를
+남겨두는 것보다 더 위험하므로, PTK는 작은 native 메뉴 막대 표면에서 현재
+상태를 먼저 명확히 보여주고, 종료 대상이 재검증될 때만 정리 action을
+허용합니다.
+
+이 프로젝트는 의도적으로 좁게 유지합니다. 로컬 개발 포트를 확인하고, 흔한
+정리 action을 제공하며, 안전 경계를 문서와 테스트로 분명하게 유지하는 것이
+초기 목표입니다.
 
 ## 현재 상태
 
@@ -20,6 +39,19 @@ PTK는 로컬 개발 환경을 빠르게 읽고 정리하기 위한 native macOS
 - 배포: 아직 설치 패키지 없음, 개발 빌드로 실행
 - 저장소 성격: 개인용 도구이지만 공개 오픈소스 저장소 기준으로 관리
 - 라이선스: `0BSD` (`SPDX-License-Identifier: 0BSD`)
+
+설치 패키지는 v0.1.0에서 준비할 예정입니다. 그 전까지 PTK는 개발자가
+Swift Package에서 직접 실행하는 앱입니다.
+
+## 프로젝트 상태
+
+- CI는 Swift package tests, Swift build, release readiness, repository
+  readiness checks를 실행합니다.
+- `CONTRIBUTING.md`에는 검증 명령과 프로세스 종료 안전 경계가 적혀 있습니다.
+- `SECURITY.md`는 비공개 제보와 머신별 정보 취급 기준을 다룹니다.
+- `docs/roadmap.md`는 현재 v0.1.0과 v0.2.0 작업을 추적합니다.
+- 앱 런타임은 Swift 전용입니다. Rust, Tauri, Node, 별도 CLI 런타임은
+  활성 제품 경로에 다시 넣지 않습니다.
 
 ## 기능
 
@@ -35,6 +67,7 @@ PTK는 설정된 포트 표현식을 주기적으로 스캔하고, 감시 대상
 - 열린 포트 번호
 - 정확히 하나의 listener가 확인된 경우 PID
 - 확인 가능한 경우 프로세스명
+- localhost URL 열기와 복사를 위한 빠른 액션
 - 안전한 대상일 때만 표시되는 종료 action
 - 포트 설정 오류나 조회 오류
 
@@ -70,13 +103,31 @@ PTK는 `SIGTERM`만 보냅니다. force kill, mismatch override, 모호한 liste
 
 ### 설정
 
+![PTK 설정 sheet](docs/assets/ptk-settings.png)
+
 설정 sheet에서 다음을 바꿀 수 있습니다.
 
 - 감시 포트 표현식
+- 흔한 로컬 개발 스택용 포트 프리셋
 - 저장 전 유효성 검증
 - 새로고침 주기: `1s`, `3s`, `5s`, `10s`
 - 테마 선택: 시스템, 라이트, 다크
 - `UserDefaults` 기반 설정 저장
+
+### 포트 프리셋과 빠른 액션
+
+설정 sheet에는 검증된 포트 프리셋이 있습니다.
+
+| 프리셋 | 표현식 |
+| --- | --- |
+| Full Stack | `3000-3009,5173-5182,4200-4209,8080-8089` |
+| Frontend | `3000-3009,5173-5182` |
+| API | `8000-8009,8080-8089` |
+| Data | `3306,5432,6379,27017` |
+
+열린 포트 행에서는 `http://localhost:<port>`를 브라우저로 열거나 URL을
+복사할 수 있습니다. 하단 버튼은 현재 열려 있는 감시 포트 요약을
+클립보드에 복사합니다.
 
 ## 기본 감시 포트
 

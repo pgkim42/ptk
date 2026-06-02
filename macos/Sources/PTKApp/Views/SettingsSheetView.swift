@@ -38,6 +38,18 @@ struct SettingsSheetView: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                Text("포트 프리셋").font(.caption).foregroundStyle(.secondary)
+                LazyVGrid(
+                    columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)],
+                    spacing: 6
+                ) {
+                    ForEach(viewModel.portPresets) { preset in
+                        presetButton(preset)
+                    }
+                }
+            }
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("새로고침 주기").font(.caption).foregroundStyle(.secondary)
                 Picker("", selection: $selectedInterval) {
@@ -85,5 +97,36 @@ struct SettingsSheetView: View {
         .frame(width: 320)
         .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(viewModel.theme.preferredColorScheme)
+    }
+
+    private func presetButton(_ preset: PortPreset) -> some View {
+        let isActive = expression == preset.expression
+        return Button {
+            expression = preset.expression
+            expressionError = nil
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(preset.title)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(preset.detail)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isActive ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(isActive ? Color.accentColor.opacity(0.35) : Color.secondary.opacity(0.14), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(preset.expression)
     }
 }

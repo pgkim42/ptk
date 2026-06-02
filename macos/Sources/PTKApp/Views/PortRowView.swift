@@ -3,6 +3,8 @@ import PTKCore
 
 struct PortRowView: View {
     let status: PortStatus
+    let onOpen: (PortStatus) -> Void
+    let onCopy: (PortStatus) -> Void
     let onKill: (KillTarget) -> Void
 
     var body: some View {
@@ -44,6 +46,24 @@ struct PortRowView: View {
             }
 
             Spacer()
+
+            Button {
+                onOpen(status)
+            } label: {
+                Image(systemName: "safari")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
+            .help("localhost 열기")
+
+            Button {
+                onCopy(status)
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
+            .help("localhost URL 복사")
 
             if let target = KillTarget.safe(port: status.port, pid: status.pid, processName: status.processName) {
                 Button {

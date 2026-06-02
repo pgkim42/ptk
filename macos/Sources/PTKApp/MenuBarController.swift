@@ -148,6 +148,14 @@ final class MenuBarController: NSObject {
             onIntervalChange: { [weak self] interval in
                 self?.refreshScheduler?.changeInterval(to: interval)
                 self?.scheduleRefreshTimer()
+            },
+            onOpenLocalhost: { url in
+                NSWorkspace.shared.open(url)
+            },
+            onCopyText: { text in
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
             }
         )
     }

@@ -131,7 +131,15 @@ struct ContentView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(viewModel.openPorts, id: \.port) { status in
-                            PortRowView(status: status) { target in
+                            PortRowView(
+                                status: status,
+                                onOpen: { status in
+                                    viewModel.openLocalhost(for: status)
+                                },
+                                onCopy: { status in
+                                    viewModel.copyLocalhostURL(for: status)
+                                }
+                            ) { target in
                                 viewModel.requestKill(target)
                             }
                         }
@@ -174,6 +182,10 @@ struct ContentView: View {
                 .background(Capsule().fill(PTKTheme.card))
 
             Spacer()
+
+            iconButton("doc.on.doc", help: "열린 포트 요약 복사") {
+                viewModel.copyOpenPortsSummary()
+            }
 
             iconButton("gearshape", help: "설정") {
                 viewModel.isShowingSettings = true
