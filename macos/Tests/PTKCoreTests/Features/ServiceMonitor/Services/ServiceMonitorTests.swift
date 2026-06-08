@@ -104,6 +104,24 @@ import Testing
             ServiceStatus(name: "MongoDB", detail: "Port 27017", state: .stopped)
         ])
     }
+
+    @Test func databaseStatusesCanUseCustomReadOnlyEndpoints() {
+        let monitor = ServiceMonitor(
+            runner: FakeServiceCommandRunner(),
+            connector: FakeServiceSocketChecker(openPorts: [4566, 9200]),
+            databaseEndpoints: [
+                DatabaseEndpoint(name: "LocalStack", port: 4566),
+                DatabaseEndpoint(name: "Elasticsearch", port: 9200),
+                DatabaseEndpoint(name: "RabbitMQ", port: 5672)
+            ]
+        )
+
+        #expect(monitor.databaseStatuses() == [
+            ServiceStatus(name: "LocalStack", detail: "Port 4566", state: .running),
+            ServiceStatus(name: "Elasticsearch", detail: "Port 9200", state: .running),
+            ServiceStatus(name: "RabbitMQ", detail: "Port 5672", state: .stopped)
+        ])
+    }
 }
 
 private final class FakeServiceCommandRunner: ServiceCommandRunning, @unchecked Sendable {

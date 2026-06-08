@@ -17,6 +17,10 @@ struct ContentView: View {
                     errorBanner(errorMessage)
                 }
 
+                if !viewModel.recentPortChanges.isEmpty {
+                    recentChangesBanner
+                }
+
                 portSection
 
                 if !viewModel.serviceStatuses.isEmpty {
@@ -138,6 +142,9 @@ struct ContentView: View {
                                 },
                                 onCopy: { status in
                                     viewModel.copyLocalhostURL(for: status)
+                                },
+                                onCopyDetails: { status in
+                                    viewModel.copyPortDetails(for: status)
                                 }
                             ) { target in
                                 viewModel.requestKill(target)
@@ -233,6 +240,30 @@ struct ContentView: View {
         .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(PTKTheme.orange.opacity(0.12)))
     }
 
+    private var recentChangesBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "clock.arrow.circlepath")
+                .foregroundStyle(PTKTheme.blue)
+            Text("최근 변경")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(PTKTheme.faint)
+            Text(viewModel.recentPortChanges.prefix(2).map(\.displayText).joined(separator: "  ·  "))
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(PTKTheme.text)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(PTKTheme.blue.opacity(0.10)))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(PTKTheme.blue.opacity(0.18), lineWidth: 1)
+        }
+        .help(viewModel.recentPortChanges.map(\.displayText).joined(separator: "\n"))
+    }
+
     private var watchedPortsSummary: String {
         "\(viewModel.openPorts.count)/\(viewModel.statuses.count)"
     }
@@ -316,6 +347,7 @@ enum PTKTheme {
     static let green = Color(red: 0.32, green: 0.86, blue: 0.50)
     static let red = Color(red: 0.92, green: 0.34, blue: 0.36)
     static let orange = Color(red: 1.00, green: 0.68, blue: 0.28)
+    static let blue = Color(red: 0.36, green: 0.62, blue: 1.00)
 
     private static func adaptive(light: NSColor, dark: NSColor) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in

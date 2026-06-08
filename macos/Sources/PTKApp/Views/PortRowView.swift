@@ -5,79 +5,112 @@ struct PortRowView: View {
     let status: PortStatus
     let onOpen: (PortStatus) -> Void
     let onCopy: (PortStatus) -> Void
+    let onCopyDetails: (PortStatus) -> Void
     let onKill: (KillTarget) -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(PTKTheme.green)
-                .frame(width: 7, height: 7)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(PTKTheme.green)
+                    .frame(width: 7, height: 7)
 
-            Text("\(status.port)")
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundStyle(PTKTheme.text)
-                .lineLimit(1)
-                .frame(width: 46, alignment: .leading)
-
-            if let pid = status.pid {
-                Text("PID \(pid)")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(PTKTheme.muted)
-                    .lineLimit(1)
-                    .frame(width: 68, alignment: .leading)
-            } else {
-                Text("PID -")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(PTKTheme.faint)
-                    .lineLimit(1)
-                    .frame(width: 68, alignment: .leading)
-            }
-
-            if let processName = status.processName, !processName.isEmpty {
-                Text(processName)
-                    .font(.system(size: 12, weight: .semibold))
+                Text("\(status.port)")
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundStyle(PTKTheme.text)
                     .lineLimit(1)
-                    .truncationMode(.tail)
-            } else {
-                Text("unknown")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(PTKTheme.faint)
-            }
+                    .frame(width: 46, alignment: .leading)
 
-            Spacer()
-
-            Button {
-                onOpen(status)
-            } label: {
-                Image(systemName: "safari")
-                    .font(.system(size: 10, weight: .semibold))
-            }
-            .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
-            .help("localhost 열기")
-
-            Button {
-                onCopy(status)
-            } label: {
-                Image(systemName: "doc.on.doc")
-                    .font(.system(size: 10, weight: .semibold))
-            }
-            .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
-            .help("localhost URL 복사")
-
-            if let target = KillTarget.safe(port: status.port, pid: status.pid, processName: status.processName) {
-                Button {
-                    onKill(target)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
+                if let pid = status.pid {
+                    Text("PID \(pid)")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(PTKTheme.muted)
+                        .lineLimit(1)
+                        .frame(width: 68, alignment: .leading)
+                } else {
+                    Text("PID -")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(PTKTheme.faint)
+                        .lineLimit(1)
+                        .frame(width: 68, alignment: .leading)
                 }
-                .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.red, size: 22))
-                .help("프로세스 종료")
+
+                if let processName = status.processName, !processName.isEmpty {
+                    Text(processName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(PTKTheme.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else {
+                    Text("unknown")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(PTKTheme.faint)
+                }
+
+                Spacer()
+
+                Button {
+                    onOpen(status)
+                } label: {
+                    Image(systemName: "safari")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
+                .help("localhost 열기")
+
+                Button {
+                    onCopy(status)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
+                .help("localhost URL 복사")
+
+                Button {
+                    onCopyDetails(status)
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
+                .help("포트 정보 복사")
+
+                if let target = KillTarget.safe(port: status.port, pid: status.pid, processName: status.processName) {
+                    Button {
+                        onKill(target)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.red, size: 22))
+                    .help("프로세스 종료")
+                } else if let reason = status.killUnavailableReason {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(PTKTheme.orange)
+                        .frame(width: 22, height: 22)
+                        .help(reason)
+                }
+            }
+
+            if let reason = status.killUnavailableReason {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 8, weight: .semibold))
+                    Text(reason)
+                        .font(.system(size: 9, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .foregroundStyle(PTKTheme.orange)
+                .padding(.leading, 61)
+                .help(reason)
             }
         }
         .padding(.horizontal, 9)
-        .frame(height: 29)
+        .padding(.vertical, status.killUnavailableReason == nil ? 0 : 4)
+        .frame(minHeight: status.killUnavailableReason == nil ? 29 : 44)
         .background(Color.clear)
     }
 }

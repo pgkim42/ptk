@@ -6,14 +6,25 @@ typealias ServiceStatusLoader = (@escaping @MainActor ([ServiceStatus]) -> Void)
 
 private final class DefaultServiceStatusLoader: @unchecked Sendable {
     private let serviceMonitor: ServiceMonitor
+    private let customEndpoints: () -> [DatabaseEndpoint]
 
-    init(serviceMonitor: ServiceMonitor) {
+    init(
+        serviceMonitor: ServiceMonitor,
+        customEndpoints: @escaping () -> [DatabaseEndpoint] = { [] }
+    ) {
         self.serviceMonitor = serviceMonitor
+        self.customEndpoints = customEndpoints
     }
 
     func load(completion: @escaping @MainActor ([ServiceStatus]) -> Void) {
         DispatchQueue.global(qos: .utility).async { [self] in
-            let statuses = serviceMonitor.scan()
+            let defaultStatuses = serviceMonitor.scan()
+            let defaultPorts = Set(ServiceMonitor.defaultDatabaseEndpoints.map(\.port))
+            let customEndpoints = customEndpoints().filter { !defaultPorts.contains($0.port) }
+            let customStatuses = customEndpoints.isEmpty
+                ? []
+                : ServiceMonitor(databaseEndpoints: customEndpoints).databaseStatuses()
+            let statuses = defaultStatuses + customStatuses
             Task { @MainActor in
                 completion(statuses)
             }
@@ -36,6 +47,8 @@ final class MenuBarController: NSObject {
     private var hostingController: NSHostingController<ContentView>?
     private var statuses: [PortStatus] = []
     private var serviceStatuses: [ServiceStatus] = []
+    private var previousStatusesForChanges: [PortStatus]?
+    private var recentPortChanges: [PortChange] = []
     private var errorMessage: String?
 
     init(
@@ -50,7 +63,10 @@ final class MenuBarController: NSObject {
         self.parser = parser
         self.scanner = scanner
         self.killService = killService
-        let defaultServiceStatusLoader = DefaultServiceStatusLoader(serviceMonitor: serviceMonitor)
+        let defaultServiceStatusLoader = DefaultServiceStatusLoader(
+            serviceMonitor: serviceMonitor,
+            customEndpoints: { settings.customServiceEndpoints }
+        )
         self.serviceStatusLoader = serviceStatusLoader ?? defaultServiceStatusLoader.load(completion:)
         super.init()
         self.refreshScheduler = RefreshScheduler(interval: settings.refreshInterval) { [weak self] in
@@ -239,7 +255,9 @@ final class MenuBarController: NSObject {
         loadServiceStatuses()
         do {
             let ports = try parser.parse(settings.watchedPortsExpression)
-            statuses = scanner.scan(ports: ports)
+            let scannedStatuses = scanner.scan(ports: ports)
+            trackPortChanges(scannedStatuses)
+            statuses = scannedStatuses
             errorMessage = statuses.compactMap(\.message).first
         } catch {
             errorMessage = "포트 설정 오류: \(error)"
@@ -255,9 +273,20 @@ final class MenuBarController: NSObject {
         }
     }
 
+    private func trackPortChanges(_ scannedStatuses: [PortStatus]) {
+        if let previousStatusesForChanges {
+            let changes = PortChange.detect(previous: previousStatusesForChanges, current: scannedStatuses)
+            if !changes.isEmpty {
+                recentPortChanges = Array((changes + recentPortChanges).prefix(4))
+            }
+        }
+        previousStatusesForChanges = scannedStatuses
+    }
+
     private func updateViewModel() {
         viewModel.statuses = statuses
         viewModel.serviceStatuses = serviceStatuses
+        viewModel.recentPortChanges = recentPortChanges
         viewModel.errorMessage = errorMessage
         statusItem?.button?.title = viewModel.menuBarTitle
     }

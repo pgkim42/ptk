@@ -86,7 +86,10 @@ PTK also shows read-only status for common local development services:
 | Redis | port `6379` |
 | MongoDB | port `27017` |
 
-These rows are status indicators only. PTK does not start, stop, restart, or manage Docker containers or database services.
+These rows are status indicators only. PTK does not start, stop, restart, or
+manage Docker containers or database services. Additional read-only service port
+checks can be saved in settings for tools such as RabbitMQ, Elasticsearch,
+MinIO, or LocalStack.
 
 ### Safe Process Termination
 
@@ -113,6 +116,8 @@ The settings sheet supports:
 - watched port expression editing
 - port presets for common local development stacks
 - validation before saving
+- named watched-port profiles
+- custom read-only service port checks
 - refresh interval selection: `1s`, `3s`, `5s`, `10s`
 - theme selection: system, light, dark
 - persistence through `UserDefaults`
@@ -129,8 +134,9 @@ The settings sheet includes validated port presets:
 | Data | `3306,5432,6379,27017` |
 
 Open port rows include quick actions to open `http://localhost:<port>` in the
-browser or copy that localhost URL. The footer can copy a compact summary of
-currently open watched ports.
+browser, copy that localhost URL, or copy port details such as PID, process name,
+and kill-unavailable reasons. The footer can copy a compact summary of currently
+open watched ports.
 
 ## Default Watched Ports
 

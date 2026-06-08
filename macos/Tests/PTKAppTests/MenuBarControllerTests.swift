@@ -64,6 +64,33 @@ import Testing
         #expect(controller.viewModel.openPorts.allSatisfy { $0.isOpen })
     }
 
+    @Test func refreshRecordsRecentPortChangesAfterInitialBaseline() {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000,3001"
+        let connector = MutableFakeSocketConnector(openPorts: [])
+        let controller = MenuBarController(
+            settings: settings,
+            scanner: PortScanner(
+                connector: connector,
+                lookup: ProcessLookup(runner: FakeProcessRunner())
+            ),
+            serviceStatusLoader: { _ in }
+        )
+
+        controller.performRefresh()
+        #expect(controller.viewModel.recentPortChanges.isEmpty)
+
+        connector.openPorts = [3000]
+        controller.performRefresh()
+        #expect(controller.viewModel.recentPortChanges.map(\.kind) == [.opened])
+        #expect(controller.viewModel.recentPortChanges.map(\.port) == [3000])
+
+        connector.openPorts = []
+        controller.performRefresh()
+        #expect(controller.viewModel.recentPortChanges.map(\.kind).prefix(2) == [.closed, .opened])
+        #expect(controller.viewModel.recentPortChanges.map(\.port).prefix(2) == [3000, 3000])
+    }
+
     @Test func refreshSetsErrorOnBadExpression() {
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.watchedPortsExpression = "invalid-!!!"
@@ -257,6 +284,58 @@ import Testing
         #expect(refreshCount == 1)
     }
 
+    @Test func customProfilesPersistApplyAndDelete() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+        var refreshCount = 0
+        let viewModel = makeViewModel(
+            settings: settings,
+            onRefresh: {
+                refreshCount += 1
+            }
+        )
+
+        try viewModel.saveCustomProfile(title: "Client A", expression: "3000,5173")
+        #expect(viewModel.customPortProfiles.map(\.title) == ["Client A"])
+
+        try viewModel.applyProfile(viewModel.customPortProfiles[0])
+        #expect(viewModel.portExpression == "3000,5173")
+        #expect(refreshCount == 1)
+
+        viewModel.deleteCustomProfile(viewModel.customPortProfiles[0])
+        #expect(viewModel.customPortProfiles.isEmpty)
+        #expect(AppSettings(store: store).customPortProfiles.isEmpty)
+    }
+
+    @Test func customServicesPersistDeleteAndRefresh() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+        var refreshCount = 0
+        let viewModel = makeViewModel(
+            settings: settings,
+            onRefresh: {
+                refreshCount += 1
+            }
+        )
+
+        try viewModel.saveCustomServiceEndpoint(name: "RabbitMQ", portText: "5672")
+        #expect(viewModel.customServiceEndpoints == [DatabaseEndpoint(name: "RabbitMQ", port: 5672)])
+        #expect(refreshCount == 1)
+
+        viewModel.deleteCustomServiceEndpoint(viewModel.customServiceEndpoints[0])
+        #expect(viewModel.customServiceEndpoints.isEmpty)
+        #expect(AppSettings(store: store).customServiceEndpoints.isEmpty)
+        #expect(refreshCount == 2)
+    }
+
+    @Test func customServicesRejectNonNumericPortText() {
+        let viewModel = makeViewModel()
+
+        #expect(throws: AppSettingsError.invalidServicePort) {
+            try viewModel.saveCustomServiceEndpoint(name: "Broken", portText: "nope")
+        }
+    }
+
     @Test func quickActionsForwardOpenAndCopyRequests() {
         var openedURL: URL?
         var copiedText: String?
@@ -277,9 +356,36 @@ import Testing
         viewModel.copyLocalhostURL(for: status)
         #expect(copiedText == "http://localhost:5173")
 
+        viewModel.copyPortDetails(for: status)
+        #expect(copiedText == """
+        Port: 5173
+        URL: http://localhost:5173
+        PID: 42
+        Process: vite
+        """)
+
         viewModel.copyOpenPortsSummary()
         #expect(copiedText?.contains("5173") == true)
         #expect(copiedText?.contains("vite") == true)
+    }
+
+    @Test func copyPortDetailsIncludesKillUnavailableReasonWhenBlocked() {
+        var copiedText: String?
+        let viewModel = makeViewModel(
+            onCopyText: { text in
+                copiedText = text
+            }
+        )
+        let status = PortStatus(
+            port: 3000,
+            isOpen: true,
+            message: "ambiguous process lookup: port 3000 has PIDs 1, 2"
+        )
+
+        viewModel.copyPortDetails(for: status)
+
+        #expect(copiedText?.contains("Port: 3000") == true)
+        #expect(copiedText?.contains("Kill unavailable: ambiguous process lookup") == true)
     }
 }
 
@@ -312,6 +418,18 @@ private final class FakeProcessRunner: ProcessRunning {
 
 private struct FakeSocketConnector: SocketConnecting {
     let openPorts: Set<UInt16>
+
+    func isListening(host: String, port: UInt16, timeout: Double) -> Bool {
+        openPorts.contains(port)
+    }
+}
+
+private final class MutableFakeSocketConnector: SocketConnecting {
+    var openPorts: Set<UInt16>
+
+    init(openPorts: Set<UInt16>) {
+        self.openPorts = openPorts
+    }
 
     func isListening(host: String, port: UInt16, timeout: Double) -> Bool {
         openPorts.contains(port)

@@ -149,9 +149,11 @@ public struct TCPServiceSocketChecker: ServiceSocketChecking {
     }
 }
 
-public struct DatabaseEndpoint: Equatable, Sendable {
+public struct DatabaseEndpoint: Equatable, Identifiable, Codable, Sendable {
     public let name: String
     public let port: UInt16
+
+    public var id: String { "\(name.lowercased())-\(port)" }
 
     public init(name: String, port: UInt16) {
         self.name = name

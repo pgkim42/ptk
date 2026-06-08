@@ -69,4 +69,81 @@ import Testing
         }
         #expect(settings.watchedPortsExpression == "3000")
     }
+
+    @Test func customPortProfilesPersistReplaceAndDeleteByName() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+
+        try settings.saveCustomPortProfile(title: " Work API ", expression: " 8000-8002 ")
+        try settings.saveCustomPortProfile(title: "Frontend", expression: "3000,5173")
+        try settings.saveCustomPortProfile(title: "work api", expression: "8080")
+
+        let reloaded = AppSettings(store: store)
+        #expect(reloaded.customPortProfiles.map(\.title) == ["Frontend", "work api"])
+        #expect(reloaded.customPortProfiles.map(\.expression) == ["3000,5173", "8080"])
+
+        reloaded.deleteCustomPortProfile(id: "frontend")
+        #expect(reloaded.customPortProfiles.map(\.id) == ["work api"])
+    }
+
+    @Test func customServiceEndpointsPersistReplaceAndDeleteByNameAndPort() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+
+        try settings.saveCustomServiceEndpoint(name: " RabbitMQ ", port: 5672)
+        try settings.saveCustomServiceEndpoint(name: "LocalStack", port: 4566)
+        try settings.saveCustomServiceEndpoint(name: "rabbitmq", port: 5672)
+
+        let reloaded = AppSettings(store: store)
+        #expect(reloaded.customServiceEndpoints.map(\.name) == ["LocalStack", "rabbitmq"])
+        #expect(reloaded.customServiceEndpoints.map(\.port) == [4566, 5672])
+
+        reloaded.deleteCustomServiceEndpoint(id: "localstack-4566")
+        #expect(reloaded.customServiceEndpoints.map(\.id) == ["rabbitmq-5672"])
+    }
+
+    @Test func customServiceEndpointsRejectEmptyNameAndInvalidPort() throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
+
+        #expect(throws: AppSettingsError.emptyServiceName) {
+            try settings.saveCustomServiceEndpoint(name: " ", port: 5672)
+        }
+        #expect(throws: AppSettingsError.invalidServicePort) {
+            try settings.saveCustomServiceEndpoint(name: "Broken", port: 0)
+        }
+        #expect(throws: AppSettingsError.invalidServicePort) {
+            try settings.saveCustomServiceEndpoint(name: "Broken", port: 70_000)
+        }
+        #expect(settings.customServiceEndpoints.isEmpty)
+    }
+
+    @Test func customPortProfilesRejectEmptyNameAndInvalidExpression() throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
+
+        #expect(throws: AppSettingsError.emptyProfileName) {
+            try settings.saveCustomPortProfile(title: " ", expression: "3000")
+        }
+        #expect(throws: PortRangeParserError.invalidToken("nope")) {
+            try settings.saveCustomPortProfile(title: "Broken", expression: "nope")
+        }
+        #expect(settings.customPortProfiles.isEmpty)
+    }
+
+    @Test func customPortProfilesIgnoreMalformedStorage() {
+        let store = InMemorySettingsStore()
+        store.set("not json", forKey: AppSettings.Key.customPortProfiles)
+
+        let settings = AppSettings(store: store)
+
+        #expect(settings.customPortProfiles.isEmpty)
+    }
+
+    @Test func customServiceEndpointsIgnoreMalformedStorage() {
+        let store = InMemorySettingsStore()
+        store.set("not json", forKey: AppSettings.Key.customServiceEndpoints)
+
+        let settings = AppSettings(store: store)
+
+        #expect(settings.customServiceEndpoints.isEmpty)
+    }
 }

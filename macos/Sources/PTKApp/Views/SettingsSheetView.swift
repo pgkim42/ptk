@@ -6,8 +6,12 @@ struct SettingsSheetView: View {
     @State private var expressionError: String?
     @State private var selectedInterval: RefreshInterval
     @State private var selectedTheme: AppTheme
+    @State private var profileTitle = ""
+    @State private var serviceName = ""
+    @State private var servicePort = ""
+    @State private var serviceError: String?
 
-    let viewModel: PortMonitorViewModel
+    @ObservedObject var viewModel: PortMonitorViewModel
     let onDismiss: () -> Void
 
     init(viewModel: PortMonitorViewModel, onDismiss: @escaping () -> Void) {
@@ -49,6 +53,10 @@ struct SettingsSheetView: View {
                     }
                 }
             }
+
+            customProfilesSection
+            customServicesSection
+
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("새로고침 주기").font(.caption).foregroundStyle(.secondary)
@@ -99,6 +107,153 @@ struct SettingsSheetView: View {
         .preferredColorScheme(viewModel.theme.preferredColorScheme)
     }
 
+    private var customProfilesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("사용자 프로필").font(.caption).foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                TextField("프로필 이름", text: $profileTitle)
+                    .textFieldStyle(.roundedBorder)
+
+                Button("저장") {
+                    do {
+                        try viewModel.saveCustomProfile(title: profileTitle, expression: expression)
+                        profileTitle = ""
+                        expressionError = nil
+                    } catch {
+                        expressionError = "\(error)"
+                    }
+                }
+                .disabled(profileTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || expression.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if !viewModel.customPortProfiles.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(viewModel.customPortProfiles) { profile in
+                        customProfileRow(profile)
+                    }
+                }
+            }
+        }
+    }
+
+    private func customProfileRow(_ profile: PortProfile) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                expression = profile.expression
+                expressionError = nil
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile.title)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(profile.expression)
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                .padding(.horizontal, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(expression == profile.expression ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(expression == profile.expression ? Color.accentColor.opacity(0.35) : Color.secondary.opacity(0.14), lineWidth: 1)
+                }
+            }
+            .buttonStyle(.plain)
+            .help(profile.expression)
+
+            Button {
+                viewModel.deleteCustomProfile(profile)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("프로필 삭제")
+        }
+    }
+
+    private var customServicesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("서비스 포트").font(.caption).foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                TextField("이름", text: $serviceName)
+                    .textFieldStyle(.roundedBorder)
+                TextField("포트", text: $servicePort)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(width: 72)
+
+                Button("추가") {
+                    do {
+                        try viewModel.saveCustomServiceEndpoint(name: serviceName, portText: servicePort)
+                        serviceName = ""
+                        servicePort = ""
+                        serviceError = nil
+                    } catch {
+                        serviceError = "\(error)"
+                    }
+                }
+                .disabled(serviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || servicePort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let serviceError {
+                Text(serviceError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            if !viewModel.customServiceEndpoints.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(viewModel.customServiceEndpoints) { endpoint in
+                        customServiceRow(endpoint)
+                    }
+                }
+            }
+        }
+    }
+
+    private func customServiceRow(_ endpoint: DatabaseEndpoint) -> some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(endpoint.name)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text("Port \(endpoint.port)")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.secondary.opacity(0.14), lineWidth: 1)
+            }
+
+            Button {
+                viewModel.deleteCustomServiceEndpoint(endpoint)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("서비스 삭제")
+        }
+    }
     private func presetButton(_ preset: PortPreset) -> some View {
         let isActive = expression == preset.expression
         return Button {

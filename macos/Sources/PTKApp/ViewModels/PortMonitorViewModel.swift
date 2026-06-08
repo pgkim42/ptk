@@ -6,11 +6,14 @@ import PTKCore
 final class PortMonitorViewModel: ObservableObject {
     @Published var statuses: [PortStatus] = []
     @Published var serviceStatuses: [ServiceStatus] = []
+    @Published var recentPortChanges: [PortChange] = []
     @Published var errorMessage: String?
 
     @Published var portExpression: String
     @Published var refreshInterval: RefreshInterval
     @Published var theme: AppTheme
+    @Published var customPortProfiles: [PortProfile]
+    @Published var customServiceEndpoints: [DatabaseEndpoint]
 
     @Published var killConfirmationTarget: KillTarget?
     @Published var killErrorMessage: String?
@@ -49,6 +52,8 @@ final class PortMonitorViewModel: ObservableObject {
         self.portExpression = settings.watchedPortsExpression
         self.refreshInterval = settings.refreshInterval
         self.theme = settings.theme
+        self.customPortProfiles = settings.customPortProfiles
+        self.customServiceEndpoints = settings.customServiceEndpoints
         self.onRefresh = onRefresh
         self.onIntervalChange = onIntervalChange
         self.onOpenLocalhost = onOpenLocalhost
@@ -93,6 +98,35 @@ final class PortMonitorViewModel: ObservableObject {
         try saveExpression(preset.expression)
     }
 
+    func applyProfile(_ profile: PortProfile) throws {
+        try saveExpression(profile.expression)
+    }
+
+    func saveCustomProfile(title: String, expression: String) throws {
+        try settings.saveCustomPortProfile(title: title, expression: expression, parser: parser)
+        customPortProfiles = settings.customPortProfiles
+    }
+
+    func deleteCustomProfile(_ profile: PortProfile) {
+        settings.deleteCustomPortProfile(id: profile.id)
+        customPortProfiles = settings.customPortProfiles
+    }
+
+    func saveCustomServiceEndpoint(name: String, portText: String) throws {
+        guard let port = Int(portText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw AppSettingsError.invalidServicePort
+        }
+        try settings.saveCustomServiceEndpoint(name: name, port: port)
+        customServiceEndpoints = settings.customServiceEndpoints
+        onRefresh()
+    }
+
+    func deleteCustomServiceEndpoint(_ endpoint: DatabaseEndpoint) {
+        settings.deleteCustomServiceEndpoint(id: endpoint.id)
+        customServiceEndpoints = settings.customServiceEndpoints
+        onRefresh()
+    }
+
     func saveInterval(_ interval: RefreshInterval) {
         settings.refreshInterval = interval
         refreshInterval = interval
@@ -110,6 +144,23 @@ final class PortMonitorViewModel: ObservableObject {
 
     func copyLocalhostURL(for status: PortStatus) {
         onCopyText(localhostURL(for: status.port).absoluteString)
+    }
+
+    func copyPortDetails(for status: PortStatus) {
+        var lines = [
+            "Port: \(status.port)",
+            "URL: \(localhostURL(for: status.port).absoluteString)"
+        ]
+        if let pid = status.pid {
+            lines.append("PID: \(pid)")
+        }
+        if let processName = status.processName, !processName.isEmpty {
+            lines.append("Process: \(processName)")
+        }
+        if let reason = status.killUnavailableReason {
+            lines.append("Kill unavailable: \(reason)")
+        }
+        onCopyText(lines.joined(separator: "\n"))
     }
 
     func copyOpenPortsSummary() {

@@ -4,6 +4,7 @@ public struct PortMenuRow: Equatable, Sendable {
     public let processName: String?
     public let displayText: String
     public let canRequestKill: Bool
+    public let killUnavailableReason: String?
     public let killTarget: KillTarget?
 
     public init(status: PortStatus) {
@@ -19,6 +20,7 @@ public struct PortMenuRow: Equatable, Sendable {
             parts.append(processName)
         }
         self.displayText = parts.joined(separator: " · ")
+        self.killUnavailableReason = status.killUnavailableReason
         self.killTarget = KillTarget.safe(port: status.port, pid: status.pid, processName: status.processName)
         self.canRequestKill = killTarget != nil
     }
