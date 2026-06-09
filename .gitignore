@@ -11,7 +11,8 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Codex / OMO local state
+# Agent local state
 .omo/
 .omx/
+.gjc/
 .codegraph/
