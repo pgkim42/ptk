@@ -341,14 +341,7 @@ struct ContentView: View {
     }
 
     private func recentChangeDisplayText(_ change: PortChange) -> String {
-        var parts = ["\(change.port)", change.kind.label]
-        if let processName = change.processName, !processName.isEmpty {
-            parts.append(processName.ptkDisplayProcessName)
-        }
-        if let pid = change.pid {
-            parts.append("PID \(pid)")
-        }
-        return parts.joined(separator: " · ")
+        PortChangePresenter().displayText(for: change)
     }
 
     private var watchedPortsSummary: String {

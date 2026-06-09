@@ -86,7 +86,7 @@ struct PortRowView: View {
                     }
                     .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.red, size: 22))
                     .help("프로세스 종료")
-                } else if let reason = status.killUnavailableReason {
+                } else if let reason = status.ptkKillUnavailableReason {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(PTKTheme.orange)
@@ -95,7 +95,7 @@ struct PortRowView: View {
                 }
             }
 
-            if let diagnostic = status.killUnavailableDiagnostic {
+            if let diagnostic = status.ptkKillUnavailableDiagnostic {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 8, weight: .semibold))
@@ -110,8 +110,8 @@ struct PortRowView: View {
             }
         }
         .padding(.horizontal, 9)
-        .padding(.vertical, status.killUnavailableReason == nil ? 0 : 4)
-        .frame(minHeight: status.killUnavailableReason == nil ? 29 : 44)
+        .padding(.vertical, status.ptkKillUnavailableReason == nil ? 0 : 4)
+        .frame(minHeight: status.ptkKillUnavailableReason == nil ? 29 : 44)
         .background(Color.clear)
     }
 
@@ -130,13 +130,5 @@ struct PortRowView: View {
         [diagnostic.title, diagnostic.detail, diagnostic.hint]
             .compactMap { $0 }
             .joined(separator: "\n")
-    }
-}
-
-extension String {
-    var ptkDisplayProcessName: String {
-        split(separator: "/", omittingEmptySubsequences: true)
-            .last
-            .map(String.init) ?? self
     }
 }

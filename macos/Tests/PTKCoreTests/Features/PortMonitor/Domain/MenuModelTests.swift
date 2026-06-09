@@ -52,11 +52,29 @@ import Testing
             PortStatus(port: 3004, isOpen: false)
         ]).rows
 
-        #expect(rows[0].killUnavailableReason == "PID를 찾을 수 없어 안전하게 종료할 수 없음")
-        #expect(rows[1].killUnavailableReason == "프로세스 이름을 확인할 수 없어 안전하게 종료할 수 없음")
-        #expect(rows[2].killUnavailableReason == "여러 listener가 있어 안전하게 종료할 수 없음")
-        #expect(rows[3].killUnavailableReason == nil)
+        #expect(rows[0].killUnavailableCause == .missingPID)
+        #expect(rows[1].killUnavailableCause == .missingProcessName(pid: 222))
+        #expect(rows[2].killUnavailableCause == .ambiguousListener(message: "ambiguous process lookup: port 3002 has PIDs 1, 2"))
+        #expect(rows[3].killUnavailableCause == nil)
         #expect(rows.map(\.port) == [3000, 3001, 3002, 3003])
+    }
+
+    @Test func killUnavailableCauseExposesDomainDataSeparatelyFromText() {
+        let ambiguous = PortStatus(
+            port: 3002,
+            isOpen: true,
+            message: "ambiguous process lookup: port 3002 has PIDs 1, 2"
+        )
+        let lookupFailure = PortStatus(port: 3003, isOpen: true, message: "lsof failed")
+        let missingPID = PortStatus(port: 3000, isOpen: true)
+        let missingProcessName = PortStatus(port: 3001, isOpen: true, pid: 222)
+        let safe = PortStatus(port: 3004, isOpen: true, pid: 333, processName: "node")
+
+        #expect(ambiguous.killUnavailableCause == .ambiguousListener(message: "ambiguous process lookup: port 3002 has PIDs 1, 2"))
+        #expect(lookupFailure.killUnavailableCause == .lookupFailed(message: "lsof failed"))
+        #expect(missingPID.killUnavailableCause == .missingPID)
+        #expect(missingProcessName.killUnavailableCause == .missingProcessName(pid: 222))
+        #expect(safe.killUnavailableCause == nil)
     }
 
     @Test func portChangesDetectOpenClosedAndProcessUpdates() {
@@ -74,11 +92,9 @@ import Testing
         let changes = PortChange.detect(previous: previous, current: current)
 
         #expect(changes.map(\.kind) == [.opened, .closed, .changed])
-        #expect(changes.map(\.displayText) == [
-            "3000 · 열림 · rails · PID 30",
-            "3001 · 닫힘",
-            "3002 · 변경 · vite · PID 21"
-        ])
+        #expect(changes.map(\.port) == [3000, 3001, 3002])
+        #expect(changes.map(\.pid) == [30, nil, 21])
+        #expect(changes.map(\.processName) == ["rails", nil, "vite"])
     }
 
     @Test func errorStateDoesNotHideRows() {

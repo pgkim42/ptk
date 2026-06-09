@@ -13,7 +13,85 @@ struct ServiceStatusGroup: Equatable, Identifiable {
     let title: String
     let statuses: [ServiceStatus]
 }
+struct KillUnavailableDiagnostic: Equatable, Sendable {
+    let title: String
+    let detail: String?
+    let hint: String
+}
 
+struct KillUnavailableDiagnosticPresenter {
+    func diagnostic(for status: PortStatus) -> KillUnavailableDiagnostic? {
+        guard let cause = status.killUnavailableCause else { return nil }
+        switch cause {
+        case let .ambiguousListener(message):
+            return KillUnavailableDiagnostic(
+                title: "여러 listener가 있어 안전하게 종료할 수 없음",
+                detail: message,
+                hint: "포트 \(status.port)를 점유한 프로세스를 터미널에서 직접 확인한 뒤 정리하세요."
+            )
+        case let .lookupFailed(message):
+            return KillUnavailableDiagnostic(
+                title: "프로세스 조회 실패로 안전하게 종료할 수 없음",
+                detail: message,
+                hint: "새로고침 후에도 반복되면 lsof/ps 결과를 확인하세요."
+            )
+        case .missingPID:
+            return KillUnavailableDiagnostic(
+                title: "PID를 찾을 수 없어 안전하게 종료할 수 없음",
+                detail: nil,
+                hint: "프로세스 조회 권한 또는 포트 상태를 확인한 뒤 다시 새로고침하세요."
+            )
+        case let .missingProcessName(pid):
+            return KillUnavailableDiagnostic(
+                title: "프로세스 이름을 확인할 수 없어 안전하게 종료할 수 없음",
+                detail: nil,
+                hint: "PID \(pid)의 프로세스가 바뀌었을 수 있으니 다시 새로고침하세요."
+            )
+        }
+    }
+}
+
+extension PortStatus {
+    var ptkKillUnavailableDiagnostic: KillUnavailableDiagnostic? {
+        KillUnavailableDiagnosticPresenter().diagnostic(for: self)
+    }
+
+    var ptkKillUnavailableReason: String? {
+        ptkKillUnavailableDiagnostic?.title
+    }
+}
+
+extension String {
+    var ptkDisplayProcessName: String {
+        split(separator: "/", omittingEmptySubsequences: true)
+            .last
+            .map(String.init) ?? self
+    }
+}
+
+struct PortChangePresenter {
+    func displayText(for change: PortChange) -> String {
+        var parts = ["\(change.port)", label(for: change.kind)]
+        if let processName = change.processName, !processName.isEmpty {
+            parts.append(processName.ptkDisplayProcessName)
+        }
+        if let pid = change.pid {
+            parts.append("PID \(pid)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func label(for kind: PortChangeKind) -> String {
+        switch kind {
+        case .opened:
+            "열림"
+        case .closed:
+            "닫힘"
+        case .changed:
+            "변경"
+        }
+    }
+}
 @MainActor
 final class PortMonitorViewModel: ObservableObject {
     @Published var statuses: [PortStatus] = []
@@ -204,7 +282,7 @@ final class PortMonitorViewModel: ObservableObject {
         if let processName = status.processName, !processName.isEmpty {
             lines.append("Process: \(processName)")
         }
-        if let diagnostic = status.killUnavailableDiagnostic {
+        if let diagnostic = status.ptkKillUnavailableDiagnostic {
             lines.append("Kill unavailable: \(diagnostic.title)")
             if let detail = diagnostic.detail {
                 lines.append("Detail: \(detail)")

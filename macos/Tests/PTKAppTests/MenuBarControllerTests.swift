@@ -42,6 +42,32 @@ import Testing
         #expect(serviceLoadCount == 1)
     }
 
+    @Test func serviceCompositionPolicyFiltersDefaultPortsAndPreservesOrder() {
+        let policy = ServiceStatusCompositionPolicy(defaultDatabaseEndpoints: [
+            DatabaseEndpoint(name: "PostgreSQL", port: 5432),
+            DatabaseEndpoint(name: "Redis", port: 6379)
+        ])
+        let customEndpoints = [
+            DatabaseEndpoint(name: "Custom Postgres", port: 5432),
+            DatabaseEndpoint(name: "RabbitMQ", port: 5672)
+        ]
+
+        let filteredEndpoints = policy.customEndpointsExcludingBuiltInPorts(customEndpoints)
+        let composedStatuses = policy.compose(
+            defaultStatuses: [
+                ServiceStatus(name: "Docker", detail: "Daemon", state: .running),
+                ServiceStatus(name: "PostgreSQL", detail: "Port 5432", state: .stopped)
+            ],
+            customStatuses: [
+                ServiceStatus(name: "RabbitMQ", detail: "Port 5672", state: .running, group: .custom)
+            ]
+        )
+
+        #expect(filteredEndpoints == [DatabaseEndpoint(name: "RabbitMQ", port: 5672)])
+        #expect(composedStatuses.map(\.name) == ["Docker", "PostgreSQL", "RabbitMQ"])
+        #expect(composedStatuses.map(\.group) == [.builtIn, .builtIn, .custom])
+    }
+
     @Test func refreshUpdatesViewModelTitle() {
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.watchedPortsExpression = "3000,3001"
@@ -468,6 +494,35 @@ import Testing
         #expect(copiedText?.contains("Kill unavailable: 여러 listener") == true)
         #expect(copiedText?.contains("Detail: ambiguous process lookup") == true)
         #expect(copiedText?.contains("Hint:") == true)
+    }
+
+    @Test func diagnosticPresenterPreservesExactOutputForBlockedStates() throws {
+        let presenter = KillUnavailableDiagnosticPresenter()
+        let ambiguous = try #require(presenter.diagnostic(for: PortStatus(
+            port: 3000,
+            isOpen: true,
+            message: "ambiguous process lookup: port 3000 has PIDs 1, 2"
+        )))
+        let lookupFailure = try #require(presenter.diagnostic(for: PortStatus(
+            port: 3001,
+            isOpen: true,
+            message: "lsof failed"
+        )))
+        let missingPID = try #require(presenter.diagnostic(for: PortStatus(port: 3002, isOpen: true)))
+        let missingProcessName = try #require(presenter.diagnostic(for: PortStatus(port: 3003, isOpen: true, pid: 333)))
+
+        #expect(ambiguous.title == "여러 listener가 있어 안전하게 종료할 수 없음")
+        #expect(ambiguous.detail == "ambiguous process lookup: port 3000 has PIDs 1, 2")
+        #expect(ambiguous.hint == "포트 3000를 점유한 프로세스를 터미널에서 직접 확인한 뒤 정리하세요.")
+        #expect(lookupFailure.title == "프로세스 조회 실패로 안전하게 종료할 수 없음")
+        #expect(lookupFailure.detail == "lsof failed")
+        #expect(lookupFailure.hint == "새로고침 후에도 반복되면 lsof/ps 결과를 확인하세요.")
+        #expect(missingPID.title == "PID를 찾을 수 없어 안전하게 종료할 수 없음")
+        #expect(missingPID.detail == nil)
+        #expect(missingPID.hint == "프로세스 조회 권한 또는 포트 상태를 확인한 뒤 다시 새로고침하세요.")
+        #expect(missingProcessName.title == "프로세스 이름을 확인할 수 없어 안전하게 종료할 수 없음")
+        #expect(missingProcessName.detail == nil)
+        #expect(missingProcessName.hint == "PID 333의 프로세스가 바뀌었을 수 있으니 다시 새로고침하세요.")
     }
 }
 

@@ -4,27 +4,47 @@ import PTKCore
 
 typealias ServiceStatusLoader = (@escaping @MainActor ([ServiceStatus]) -> Void) -> Void
 
-private final class DefaultServiceStatusLoader: @unchecked Sendable {
+struct ServiceStatusCompositionPolicy: Equatable, Sendable {
+    let builtInDatabasePorts: Set<UInt16>
+
+    init(defaultDatabaseEndpoints: [DatabaseEndpoint] = ServiceMonitor.defaultDatabaseEndpoints) {
+        self.builtInDatabasePorts = Set(defaultDatabaseEndpoints.map(\.port))
+    }
+
+    func customEndpointsExcludingBuiltInPorts(_ endpoints: [DatabaseEndpoint]) -> [DatabaseEndpoint] {
+        endpoints.filter { !builtInDatabasePorts.contains($0.port) }
+    }
+
+    func compose(defaultStatuses: [ServiceStatus], customStatuses: [ServiceStatus]) -> [ServiceStatus] {
+        defaultStatuses + customStatuses
+    }
+}
+
+private final class DefaultServiceStatusLoader {
     private let serviceMonitor: ServiceMonitor
     private let customEndpoints: () -> [DatabaseEndpoint]
+    private let compositionPolicy: ServiceStatusCompositionPolicy
 
     init(
         serviceMonitor: ServiceMonitor,
-        customEndpoints: @escaping () -> [DatabaseEndpoint] = { [] }
+        customEndpoints: @escaping () -> [DatabaseEndpoint] = { [] },
+        compositionPolicy: ServiceStatusCompositionPolicy = ServiceStatusCompositionPolicy()
     ) {
         self.serviceMonitor = serviceMonitor
         self.customEndpoints = customEndpoints
+        self.compositionPolicy = compositionPolicy
     }
 
     func load(completion: @escaping @MainActor ([ServiceStatus]) -> Void) {
-        DispatchQueue.global(qos: .utility).async { [self] in
+        let serviceMonitor = serviceMonitor
+        let compositionPolicy = compositionPolicy
+        let customEndpoints = compositionPolicy.customEndpointsExcludingBuiltInPorts(customEndpoints())
+        DispatchQueue.global(qos: .utility).async {
             let defaultStatuses = serviceMonitor.scan()
-            let defaultPorts = Set(ServiceMonitor.defaultDatabaseEndpoints.map(\.port))
-            let customEndpoints = customEndpoints().filter { !defaultPorts.contains($0.port) }
             let customStatuses = customEndpoints.isEmpty
                 ? []
                 : ServiceMonitor(databaseEndpoints: customEndpoints).databaseStatuses(group: .custom)
-            let statuses = defaultStatuses + customStatuses
+            let statuses = compositionPolicy.compose(defaultStatuses: defaultStatuses, customStatuses: customStatuses)
             Task { @MainActor in
                 completion(statuses)
             }
