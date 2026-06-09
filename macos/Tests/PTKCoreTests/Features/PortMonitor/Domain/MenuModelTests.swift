@@ -52,9 +52,9 @@ import Testing
             PortStatus(port: 3004, isOpen: false)
         ]).rows
 
-        #expect(rows[0].killUnavailableReason == "process lookup unavailable: PID not found")
-        #expect(rows[1].killUnavailableReason == "process lookup unavailable: process name not found")
-        #expect(rows[2].killUnavailableReason == "ambiguous process lookup: port 3002 has PIDs 1, 2")
+        #expect(rows[0].killUnavailableReason == "PID를 찾을 수 없어 안전하게 종료할 수 없음")
+        #expect(rows[1].killUnavailableReason == "프로세스 이름을 확인할 수 없어 안전하게 종료할 수 없음")
+        #expect(rows[2].killUnavailableReason == "여러 listener가 있어 안전하게 종료할 수 없음")
         #expect(rows[3].killUnavailableReason == nil)
         #expect(rows.map(\.port) == [3000, 3001, 3002, 3003])
     }

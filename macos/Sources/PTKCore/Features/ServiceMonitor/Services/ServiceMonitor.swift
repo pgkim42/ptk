@@ -15,15 +15,34 @@ public enum ServiceState: Equatable, Sendable {
     }
 }
 
+public enum ServiceGroup: String, Equatable, Sendable {
+    case builtIn
+    case custom
+
+    public var label: String {
+        switch self {
+        case .builtIn: "Built-in"
+        case .custom: "Custom"
+        }
+    }
+}
+
+
 public struct ServiceStatus: Equatable, Sendable {
     public let name: String
     public let detail: String
     public let state: ServiceState
+    public let group: ServiceGroup
 
-    public init(name: String, detail: String, state: ServiceState) {
+    public init(name: String, detail: String, state: ServiceState, group: ServiceGroup = .builtIn) {
         self.name = name
         self.detail = detail
         self.state = state
+        self.group = group
+    }
+
+    public var displayIdentity: String {
+        "\(group.rawValue)-\(name.lowercased())-\(detail)"
     }
 
     public var displayText: String {
@@ -226,12 +245,13 @@ public struct ServiceMonitor: Sendable {
         return ServiceStatus(name: "Docker", detail: "Daemon", state: .stopped)
     }
 
-    public func databaseStatuses(host: String = "127.0.0.1") -> [ServiceStatus] {
+    public func databaseStatuses(host: String = "127.0.0.1", group: ServiceGroup = .builtIn) -> [ServiceStatus] {
         databaseEndpoints.map { endpoint in
             ServiceStatus(
                 name: endpoint.name,
                 detail: "Port \(endpoint.port)",
-                state: connector.isListening(host: host, port: endpoint.port, timeout: timeout) ? .running : .stopped
+                state: connector.isListening(host: host, port: endpoint.port, timeout: timeout) ? .running : .stopped,
+                group: group
             )
         }
     }

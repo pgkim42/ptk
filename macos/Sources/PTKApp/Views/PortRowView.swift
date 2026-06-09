@@ -95,18 +95,18 @@ struct PortRowView: View {
                 }
             }
 
-            if let reason = status.killUnavailableReason {
+            if let diagnostic = status.killUnavailableDiagnostic {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 8, weight: .semibold))
-                    Text(reason)
+                    Text(diagnostic.title)
                         .font(.system(size: 9, weight: .medium))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 .foregroundStyle(PTKTheme.orange)
                 .padding(.leading, 61)
-                .help(reason)
+                .help(diagnosticHelpText(diagnostic))
             }
         }
         .padding(.horizontal, 9)
@@ -124,6 +124,12 @@ struct PortRowView: View {
 
     private var processHelpText: String {
         status.processName ?? ""
+    }
+
+    private func diagnosticHelpText(_ diagnostic: KillUnavailableDiagnostic) -> String {
+        [diagnostic.title, diagnostic.detail, diagnostic.hint]
+            .compactMap { $0 }
+            .joined(separator: "\n")
     }
 }
 

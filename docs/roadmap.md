@@ -29,6 +29,20 @@ into a service orchestrator.
   command text when safe to show.
 - Small menu bar polish for empty, warning, and error states.
 
+## v0.4.0
+
+Goal: make PTK feel like a small local diagnostic console while keeping the
+menu bar surface compact and read-only service boundary intact.
+
+- Quick switching for saved watched-port profiles.
+- Read-only custom service grouping and labels.
+- Clear kill-unavailable explanations for ambiguous, missing, or mismatched
+  process lookup states.
+- Panel-open normal refresh and panel-closed quiet refresh, where quiet cadence
+  stays slower than every user-selectable refresh interval.
+- Keep the same non-goals: no unsafe kill overrides, no service lifecycle
+  management, no automatic profile switching, and no new dashboard window.
+
 ## Out of scope
 
 These are intentionally not planned for the early roadmap:

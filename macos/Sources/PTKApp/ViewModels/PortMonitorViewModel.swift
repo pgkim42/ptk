@@ -2,6 +2,18 @@ import Foundation
 import SwiftUI
 import PTKCore
 
+struct PortProfileOption: Equatable, Identifiable {
+    let id: String
+    let title: String
+    let expression: String
+}
+
+struct ServiceStatusGroup: Equatable, Identifiable {
+    let id: ServiceGroup
+    let title: String
+    let statuses: [ServiceStatus]
+}
+
 @MainActor
 final class PortMonitorViewModel: ObservableObject {
     @Published var statuses: [PortStatus] = []
@@ -64,6 +76,37 @@ final class PortMonitorViewModel: ObservableObject {
         AppDefaults.portPresets
     }
 
+    var profileOptions: [PortProfileOption] {
+        let presetOptions = portPresets.map {
+            PortProfileOption(
+                id: "preset-\($0.id)",
+                title: $0.title,
+                expression: $0.expression
+            )
+        }
+        let customOptions = customPortProfiles.map {
+            PortProfileOption(
+                id: "custom-\($0.id)",
+                title: $0.title,
+                expression: $0.expression
+            )
+        }
+        return presetOptions + customOptions
+    }
+
+    var currentProfileTitle: String {
+        profileOptions.first { $0.expression == portExpression }?.title ?? "Custom"
+    }
+
+    var groupedServiceStatuses: [ServiceStatusGroup] {
+        let builtInStatuses = serviceStatuses.filter { $0.group == .builtIn }
+        let customStatuses = serviceStatuses.filter { $0.group == .custom }
+        return [
+            ServiceStatusGroup(id: .builtIn, title: ServiceGroup.builtIn.label, statuses: builtInStatuses),
+            ServiceStatusGroup(id: .custom, title: ServiceGroup.custom.label, statuses: customStatuses)
+        ].filter { !$0.statuses.isEmpty }
+    }
+
     func refresh() {
         onRefresh()
     }
@@ -100,6 +143,10 @@ final class PortMonitorViewModel: ObservableObject {
 
     func applyProfile(_ profile: PortProfile) throws {
         try saveExpression(profile.expression)
+    }
+
+    func applyProfileOption(_ option: PortProfileOption) throws {
+        try saveExpression(option.expression)
     }
 
     func saveCustomProfile(title: String, expression: String) throws {
@@ -157,8 +204,12 @@ final class PortMonitorViewModel: ObservableObject {
         if let processName = status.processName, !processName.isEmpty {
             lines.append("Process: \(processName)")
         }
-        if let reason = status.killUnavailableReason {
-            lines.append("Kill unavailable: \(reason)")
+        if let diagnostic = status.killUnavailableDiagnostic {
+            lines.append("Kill unavailable: \(diagnostic.title)")
+            if let detail = diagnostic.detail {
+                lines.append("Detail: \(detail)")
+            }
+            lines.append("Hint: \(diagnostic.hint)")
         }
         onCopyText(lines.joined(separator: "\n"))
     }

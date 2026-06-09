@@ -122,6 +122,20 @@ import Testing
             ServiceStatus(name: "RabbitMQ", detail: "Port 5672", state: .stopped)
         ])
     }
+
+    @Test func customDatabaseStatusesCanBeGrouped() {
+        let monitor = ServiceMonitor(
+            runner: FakeServiceCommandRunner(),
+            connector: FakeServiceSocketChecker(openPorts: [5672]),
+            databaseEndpoints: [
+                DatabaseEndpoint(name: "RabbitMQ", port: 5672)
+            ]
+        )
+
+        #expect(monitor.databaseStatuses(group: .custom) == [
+            ServiceStatus(name: "RabbitMQ", detail: "Port 5672", state: .running, group: .custom)
+        ])
+    }
 }
 
 private final class FakeServiceCommandRunner: ServiceCommandRunning, @unchecked Sendable {

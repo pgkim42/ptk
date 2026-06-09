@@ -23,8 +23,9 @@ struct SettingsSheetView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("설정")
+        ScrollView {
+            VStack(spacing: 16) {
+                Text("설정")
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -101,8 +102,10 @@ struct SettingsSheetView: View {
                 .disabled(expression.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
+        }
         .padding()
         .frame(width: 320)
+        .frame(maxHeight: 520)
         .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(viewModel.theme.preferredColorScheme)
     }
@@ -140,8 +143,13 @@ struct SettingsSheetView: View {
     private func customProfileRow(_ profile: PortProfile) -> some View {
         HStack(spacing: 6) {
             Button {
-                expression = profile.expression
-                expressionError = nil
+                do {
+                    try viewModel.applyProfile(profile)
+                    expression = profile.expression
+                    expressionError = nil
+                } catch {
+                    expressionError = "\(error)"
+                }
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(profile.title)
@@ -165,7 +173,7 @@ struct SettingsSheetView: View {
                 }
             }
             .buttonStyle(.plain)
-            .help(profile.expression)
+            .help("프로필 적용: \(profile.expression)")
 
             Button {
                 viewModel.deleteCustomProfile(profile)

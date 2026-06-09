@@ -23,7 +23,7 @@ private final class DefaultServiceStatusLoader: @unchecked Sendable {
             let customEndpoints = customEndpoints().filter { !defaultPorts.contains($0.port) }
             let customStatuses = customEndpoints.isEmpty
                 ? []
-                : ServiceMonitor(databaseEndpoints: customEndpoints).databaseStatuses()
+                : ServiceMonitor(databaseEndpoints: customEndpoints).databaseStatuses(group: .custom)
             let statuses = defaultStatuses + customStatuses
             Task { @MainActor in
                 completion(statuses)
@@ -50,6 +50,14 @@ final class MenuBarController: NSObject {
     private var previousStatusesForChanges: [PortStatus]?
     private var recentPortChanges: [PortChange] = []
     private var errorMessage: String?
+    static let quietRefreshCadence: TimeInterval = 30
+
+    private enum RefreshCadence {
+        case normal
+        case quiet
+    }
+
+    private var refreshCadence: RefreshCadence = .quiet
 
     init(
         settings: AppSettings = AppSettings(),
@@ -78,6 +86,19 @@ final class MenuBarController: NSObject {
         panel?.isVisible == true
     }
 
+    var currentRefreshTimerInterval: TimeInterval? {
+        refreshTimer?.timeInterval
+    }
+
+    var activeRefreshCadenceSeconds: TimeInterval {
+        switch refreshCadence {
+        case .normal:
+            settings.refreshInterval.rawValue
+        case .quiet:
+            Self.quietRefreshCadence
+        }
+    }
+
     func start(showPanelOnLaunch: Bool = false) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
@@ -97,6 +118,7 @@ final class MenuBarController: NSObject {
     func stop() {
         refreshTimer?.invalidate()
         refreshTimer = nil
+        (panel as? PTKPanel)?.onOrderOut = nil
         panel?.orderOut(nil)
         panel = nil
         hostingController = nil
@@ -115,7 +137,7 @@ final class MenuBarController: NSObject {
 
     func writeSettingsSnapshot(to url: URL) throws {
         let hosting = NSHostingController(rootView: SettingsSheetView(viewModel: viewModel, onDismiss: {}))
-        let fittingSize = hosting.sizeThatFits(in: NSSize(width: 320, height: 360))
+        let fittingSize = hosting.sizeThatFits(in: NSSize(width: 320, height: 520))
         hosting.view.frame = NSRect(
             origin: .zero,
             size: NSSize(width: 320, height: max(fittingSize.height, 180))
@@ -163,7 +185,7 @@ final class MenuBarController: NSObject {
             },
             onIntervalChange: { [weak self] interval in
                 self?.refreshScheduler?.changeInterval(to: interval)
-                self?.scheduleRefreshTimer()
+                self?.applyCurrentPanelCadence()
             },
             onOpenLocalhost: { url in
                 NSWorkspace.shared.open(url)
@@ -197,6 +219,9 @@ final class MenuBarController: NSObject {
         utilityPanel.isReleasedWhenClosed = false
         utilityPanel.level = .floating
         utilityPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        utilityPanel.onOrderOut = { [weak self] in
+            self?.applyQuietCadence()
+        }
         panel = utilityPanel
     }
 
@@ -222,6 +247,7 @@ final class MenuBarController: NSObject {
         let y = buttonFrame.minY - panelSize.height - 8
         panel.setFrameOrigin(NSPoint(x: x, y: max(y, visibleFrame.minY + 8)))
         panel.makeKeyAndOrderFront(nil)
+        applyNormalCadence(triggerRefresh: true)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -233,18 +259,48 @@ final class MenuBarController: NSObject {
         let y = visibleFrame.midY - panelSize.height / 2
         panel.setFrameOrigin(NSPoint(x: x, y: y))
         panel.makeKeyAndOrderFront(nil)
+        applyNormalCadence(triggerRefresh: true)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     private func scheduleRefreshTimer() {
         refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(
-            timeInterval: settings.refreshInterval.rawValue,
+            timeInterval: activeRefreshCadenceSeconds,
             target: self,
             selector: #selector(timerFired(_:)),
             userInfo: nil,
             repeats: true
         )
+    }
+
+    func applyPanelClosedForTesting() {
+        applyQuietCadence()
+    }
+
+    func applyPanelOpenedForTesting() {
+        applyNormalCadence(triggerRefresh: true)
+    }
+
+    private func applyCurrentPanelCadence() {
+        if isPanelVisible {
+            applyNormalCadence(triggerRefresh: false)
+        } else {
+            applyQuietCadence()
+        }
+    }
+
+    private func applyNormalCadence(triggerRefresh: Bool) {
+        refreshCadence = .normal
+        scheduleRefreshTimer()
+        if triggerRefresh {
+            refreshScheduler?.triggerManualRefresh()
+        }
+    }
+
+    private func applyQuietCadence() {
+        refreshCadence = .quiet
+        scheduleRefreshTimer()
     }
 
     @objc private func timerFired(_ timer: Timer) {
@@ -293,6 +349,13 @@ final class MenuBarController: NSObject {
 }
 
 private final class PTKPanel: NSPanel {
+    var onOrderOut: (() -> Void)?
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    override func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        onOrderOut?()
+    }
 }

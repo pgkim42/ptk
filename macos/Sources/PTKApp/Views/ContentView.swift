@@ -173,11 +173,19 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("Services", trailing: serviceSummary)
 
-            VStack(spacing: 0) {
-                ForEach(viewModel.serviceStatuses, id: \.name) { status in
-                    ServiceStatusRowView(status: status)
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(viewModel.groupedServiceStatuses) { group in
+                        if viewModel.groupedServiceStatuses.count > 1 {
+                            serviceGroupHeader(group.title)
+                        }
+                        ForEach(group.statuses, id: \.displayIdentity) { status in
+                            ServiceStatusRowView(status: status)
+                        }
+                    }
                 }
             }
+            .frame(maxHeight: 174)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(PTKTheme.table))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -188,6 +196,8 @@ struct ContentView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
+            profileQuickSwitch
+
             Text(viewModel.refreshInterval.label)
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(PTKTheme.muted)
@@ -214,6 +224,40 @@ struct ContentView: View {
         .layoutPriority(2)
     }
 
+    private var profileQuickSwitch: some View {
+        Menu {
+            ForEach(viewModel.profileOptions) { option in
+                Button {
+                    do {
+                        try viewModel.applyProfileOption(option)
+                    } catch {
+                        viewModel.errorMessage = "프로필 적용 오류: \(error)"
+                    }
+                } label: {
+                    Text(option.title)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 9, weight: .bold))
+                Text(viewModel.currentProfileTitle)
+                    .font(.system(size: 9, weight: .bold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(PTKTheme.muted)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .frame(maxWidth: 110)
+            .background(Capsule().fill(PTKTheme.card))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+        .help("감시 포트 프로필 빠른 전환")
+    }
+
+
     private func sectionHeader(_ title: String, trailing: String? = nil) -> some View {
         HStack {
             Text(title)
@@ -231,6 +275,18 @@ struct ContentView: View {
             }
         }
         .frame(height: 12)
+    }
+
+    private func serviceGroupHeader(_ title: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(PTKTheme.faint)
+            Spacer()
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 18)
+        .background(PTKTheme.card.opacity(0.55))
     }
 
     private func errorBanner(_ message: String) -> some View {

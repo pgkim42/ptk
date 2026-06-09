@@ -124,6 +124,51 @@ import Testing
         #expect(controller.isPanelVisible)
     }
 
+    @Test func panelClosedUsesQuietCadenceSlowerThanAllUserIntervals() {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.refreshInterval = .tenSeconds
+        let controller = MenuBarController(
+            settings: settings,
+            serviceStatusLoader: { completion in completion([]) }
+        )
+        defer { controller.stop() }
+
+        controller.start(showPanelOnLaunch: true)
+        controller.applyPanelClosedForTesting()
+
+        #expect(MenuBarController.quietRefreshCadence > RefreshInterval.allCases.map(\.rawValue).max()!)
+        #expect(controller.activeRefreshCadenceSeconds == MenuBarController.quietRefreshCadence)
+        #expect((controller.currentRefreshTimerInterval ?? 0) > RefreshInterval.tenSeconds.rawValue)
+    }
+
+    @Test func panelReopenRestoresNormalTenSecondCadenceAndRefreshes() {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.refreshInterval = .tenSeconds
+        var refreshCount = 0
+        let controller = MenuBarController(
+            settings: settings,
+            scanner: PortScanner(
+                connector: FakeSocketConnector(openPorts: []),
+                lookup: ProcessLookup(runner: FakeProcessRunner())
+            ),
+            serviceStatusLoader: { completion in
+                refreshCount += 1
+                completion([])
+            }
+        )
+        defer { controller.stop() }
+
+        controller.start(showPanelOnLaunch: true)
+        controller.applyPanelClosedForTesting()
+        let closedRefreshCount = refreshCount
+        controller.applyPanelOpenedForTesting()
+
+        #expect(controller.activeRefreshCadenceSeconds == RefreshInterval.tenSeconds.rawValue)
+        #expect(controller.currentRefreshTimerInterval == RefreshInterval.tenSeconds.rawValue)
+        #expect(refreshCount > closedRefreshCount)
+    }
+
+
     @Test func panelSnapshotCanBeWrittenForAutomation() throws {
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.theme = .dark
@@ -307,6 +352,28 @@ import Testing
         #expect(AppSettings(store: store).customPortProfiles.isEmpty)
     }
 
+    @Test func profileOptionsExposePresetsAndCustomProfiles() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+        var refreshCount = 0
+        let viewModel = makeViewModel(
+            settings: settings,
+            onRefresh: { refreshCount += 1 }
+        )
+
+        try viewModel.saveCustomProfile(title: "Client A", expression: "3000,5173")
+
+        #expect(viewModel.profileOptions.map(\.title).prefix(4) == ["Full Stack", "Frontend", "API", "Data"])
+        #expect(viewModel.profileOptions.map(\.title).contains("Client A"))
+        let option = try #require(viewModel.profileOptions.first { $0.title == "Client A" })
+        try viewModel.applyProfileOption(option)
+
+        #expect(viewModel.currentProfileTitle == "Client A")
+        #expect(AppSettings(store: store).watchedPortsExpression == "3000,5173")
+        #expect(refreshCount == 1)
+    }
+
+
     @Test func customServicesPersistDeleteAndRefresh() throws {
         let store = InMemorySettingsStore()
         let settings = AppSettings(store: store)
@@ -327,6 +394,19 @@ import Testing
         #expect(AppSettings(store: store).customServiceEndpoints.isEmpty)
         #expect(refreshCount == 2)
     }
+
+    @Test func serviceStatusesGroupBuiltInAndCustomRows() {
+        let viewModel = makeViewModel()
+        viewModel.serviceStatuses = [
+            ServiceStatus(name: "Docker", detail: "Daemon", state: .running),
+            ServiceStatus(name: "RabbitMQ", detail: "Port 5672", state: .stopped, group: .custom)
+        ]
+
+        #expect(viewModel.groupedServiceStatuses.map(\.title) == ["Built-in", "Custom"])
+        #expect(viewModel.groupedServiceStatuses[0].statuses.map(\.name) == ["Docker"])
+        #expect(viewModel.groupedServiceStatuses[1].statuses.map(\.name) == ["RabbitMQ"])
+    }
+
 
     @Test func customServicesRejectNonNumericPortText() {
         let viewModel = makeViewModel()
@@ -385,7 +465,9 @@ import Testing
         viewModel.copyPortDetails(for: status)
 
         #expect(copiedText?.contains("Port: 3000") == true)
-        #expect(copiedText?.contains("Kill unavailable: ambiguous process lookup") == true)
+        #expect(copiedText?.contains("Kill unavailable: 여러 listener") == true)
+        #expect(copiedText?.contains("Detail: ambiguous process lookup") == true)
+        #expect(copiedText?.contains("Hint:") == true)
     }
 }
 

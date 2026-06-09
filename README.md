@@ -52,7 +52,7 @@ an update server yet.
   safety boundary.
 - `SECURITY.md` covers private reporting and safe handling of machine-specific
   details.
-- `docs/roadmap.md` tracks the current v0.1.0 and v0.2.0 work.
+- `docs/roadmap.md` tracks release and local diagnostic console roadmap work.
 - The app runtime is Swift-only; Rust, Tauri, Node, and separate CLI runtimes
   are intentionally kept out of the active product path.
 
@@ -74,6 +74,8 @@ The panel can show:
 - quick actions for opening or copying a localhost URL
 - kill action only when the target is safe
 - parse or lookup errors without hiding the rest of the panel
+- quick profile switching for saved watched-port profiles
+- kill-unavailable explanations with next-check hints
 
 ### Service Status
 
@@ -92,6 +94,9 @@ manage Docker containers or database services. Additional read-only service port
 checks can be saved in settings for tools such as RabbitMQ, Elasticsearch,
 MinIO, or LocalStack.
 
+Custom service checks remain read-only and are visually grouped separately from
+built-in services when present.
+
 ### Safe Process Termination
 
 PTK is intentionally conservative because killing a local process is destructive.
@@ -108,6 +113,10 @@ If any of those checks fail, PTK blocks the kill. Ambiguous same-port listeners 
 
 PTK sends `SIGTERM` only. It does not provide force kill, mismatch override, or best-effort termination for ambiguous listeners.
 
+When a kill action is blocked, PTK explains the reason, such as ambiguous
+listeners, missing PID/process metadata, or a revalidation mismatch, and keeps
+the unsafe action unavailable.
+
 ### Settings
 
 ![PTK settings sheet](docs/assets/ptk-settings.png)
@@ -122,6 +131,7 @@ The settings sheet supports:
 - refresh interval selection: `1s`, `3s`, `5s`, `10s`
 - theme selection: system, light, dark
 - persistence through `UserDefaults`
+- quick switching for saved watched-port profiles
 
 ### Port Presets and Quick Actions
 
@@ -139,6 +149,10 @@ browser, copy that localhost URL, or copy port details such as PID, process path
 or command, and kill-unavailable reasons. The row itself stays compact by showing
 the executable name first, and the footer can copy a compact summary of currently
 open watched ports.
+
+When the panel is closed, PTK reduces scan cadence with an internal quiet
+interval that is slower than every user-selectable refresh interval. Reopening
+the panel restores the selected interval and refreshes immediately.
 
 ## Default Watched Ports
 
