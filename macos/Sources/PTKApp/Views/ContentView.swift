@@ -2,7 +2,7 @@ import SwiftUI
 import PTKCore
 
 struct ContentView: View {
-    static let panelSize = NSSize(width: 352, height: 352)
+    static let panelSize = NSSize(width: 392, height: 420)
 
     @ObservedObject var viewModel: PortMonitorViewModel
 
@@ -157,7 +157,7 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(PTKTheme.border, lineWidth: 1)
                 }
-                .frame(maxHeight: viewModel.serviceStatuses.isEmpty ? 202 : 112)
+                .frame(maxHeight: viewModel.serviceStatuses.isEmpty ? 226 : 156)
             }
         }
     }
@@ -302,7 +302,7 @@ private struct EmptyPortsView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, minHeight: 54)
+        .frame(maxWidth: .infinity, minHeight: 74)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(PTKTheme.table))
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)

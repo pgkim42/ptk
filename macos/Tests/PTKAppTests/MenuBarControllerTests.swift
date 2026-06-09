@@ -198,9 +198,9 @@ import Testing
 
 @MainActor
 @Suite struct PortMonitorViewModelTests {
-    @Test func contentViewUsesCompactUtilityPanelSize() {
-        #expect(ContentView.panelSize.width == 352)
-        #expect(ContentView.panelSize.height == 352)
+    @Test func contentViewUsesReadableUtilityPanelSize() {
+        #expect(ContentView.panelSize.width == 392)
+        #expect(ContentView.panelSize.height == 420)
     }
 
     @Test func openPortsFiltersAndSorts() {
