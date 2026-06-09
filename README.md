@@ -67,9 +67,10 @@ The menu bar title shows the open watched-port count, such as `PTK 0` or `PTK 2`
 The panel can show:
 
 - open watched-port count
-- open port number
-- PID, when exactly one listener can be identified
-- process name, when available
+- open port number without locale grouping
+- PID without locale grouping, when exactly one listener can be identified
+- short process executable name in the row, when available
+- full process path or command in copied details and hover help when available
 - quick actions for opening or copying a localhost URL
 - kill action only when the target is safe
 - parse or lookup errors without hiding the rest of the panel
@@ -134,8 +135,9 @@ The settings sheet includes validated port presets:
 | Data | `3306,5432,6379,27017` |
 
 Open port rows include quick actions to open `http://localhost:<port>` in the
-browser, copy that localhost URL, or copy port details such as PID, process name,
-and kill-unavailable reasons. The footer can copy a compact summary of currently
+browser, copy that localhost URL, or copy port details such as PID, process path
+or command, and kill-unavailable reasons. The row itself stays compact by showing
+the executable name first, and the footer can copy a compact summary of currently
 open watched ports.
 
 ## Default Watched Ports
@@ -315,7 +317,7 @@ PTK currently does not provide:
 This repository is intended to remain safe for public use.
 
 - Do not commit API keys, tokens, passwords, private keys, or personal machine secrets.
-- Keep local agent state such as `.omo/` and `.omx/` ignored.
+- Keep local agent state such as `.gjc/`, `.omo/`, and `.omx/` ignored.
 - Prefer local settings or ignored files for machine-specific values.
 - Avoid documenting private infrastructure or account details.
 

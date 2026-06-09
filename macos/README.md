@@ -10,6 +10,16 @@
 - `PTKCore/Features/ServiceMonitor`: Docker daemon과 주요 로컬 DB 포트 상태 표시 로직
 - `PTKCoreTests`: core 단위 테스트
 
+## UI 동작
+
+메뉴 막대 패널은 열린 감시 포트를 compact row로 보여줍니다. 포트 번호와
+PID는 지역화 콤마 없이 표시하고, 프로세스는 긴 경로 대신 실행 파일명을
+우선 표시합니다. 전체 프로세스 경로 또는 명령은 hover 도움말과 상세 복사
+action에 남겨 둡니다.
+
+서비스 상태 행은 읽기 전용 지표이며, 중지 상태는 로컬 개발 환경에서 흔한
+상태이므로 경고보다 낮은 톤으로 표시합니다.
+
 ## 런타임 경계
 
 이 앱은 Swift/AppKit만 사용합니다. Rust, Tauri, Node, 별도 CLI 스택에 의존하지 않습니다.
