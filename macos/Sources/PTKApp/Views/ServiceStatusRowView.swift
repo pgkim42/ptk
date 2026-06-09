@@ -25,12 +25,12 @@ struct ServiceStatusRowView: View {
 
             Text(status.state.label.uppercased())
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .foregroundStyle(indicatorColor)
+                .foregroundStyle(badgeForegroundColor)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
-                .background(Capsule().fill(indicatorColor.opacity(0.10)))
+                .background(Capsule().fill(badgeBackgroundColor))
                 .overlay {
-                    Capsule().strokeBorder(indicatorColor.opacity(0.15), lineWidth: 1)
+                    Capsule().strokeBorder(badgeBorderColor, lineWidth: 1)
                 }
         }
         .padding(.horizontal, 9)
@@ -41,8 +41,30 @@ struct ServiceStatusRowView: View {
     private var indicatorColor: Color {
         switch status.state {
         case .running: PTKTheme.green
-        case .stopped: PTKTheme.red
+        case .stopped: PTKTheme.red.opacity(0.72)
         case .unavailable: PTKTheme.orange
+        }
+    }
+
+    private var badgeForegroundColor: Color {
+        switch status.state {
+        case .running: PTKTheme.green
+        case .stopped: PTKTheme.faint
+        case .unavailable: PTKTheme.orange
+        }
+    }
+
+    private var badgeBackgroundColor: Color {
+        switch status.state {
+        case .running, .unavailable: indicatorColor.opacity(0.10)
+        case .stopped: PTKTheme.card
+        }
+    }
+
+    private var badgeBorderColor: Color {
+        switch status.state {
+        case .running, .unavailable: indicatorColor.opacity(0.15)
+        case .stopped: PTKTheme.border
         }
     }
 }

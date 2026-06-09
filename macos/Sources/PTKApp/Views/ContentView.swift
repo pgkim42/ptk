@@ -68,7 +68,7 @@ struct ContentView: View {
                 viewModel.cancelKill()
             }
         } message: { target in
-            Text("Port \(target.port), PID \(target.pid), \(target.processName)를 종료합니다.")
+            Text(verbatim: "Port \(target.port), PID \(target.pid), \(target.processName)를 종료합니다.")
         }
         .alert(
             "종료 실패",
@@ -105,7 +105,7 @@ struct ContentView: View {
 
             Spacer()
 
-            Text("\(viewModel.openPorts.count) OPEN")
+            Text(verbatim: "\(viewModel.openPorts.count) OPEN")
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundStyle(viewModel.openPorts.isEmpty ? PTKTheme.faint : PTKTheme.green)
                 .lineLimit(1)
@@ -157,9 +157,16 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(PTKTheme.border, lineWidth: 1)
                 }
-                .frame(maxHeight: viewModel.serviceStatuses.isEmpty ? 226 : 156)
+                .frame(height: openPortsListHeight)
             }
         }
+    }
+
+    private var openPortsListHeight: CGFloat {
+        let rowHeight: CGFloat = 34
+        let maxVisibleRows = viewModel.serviceStatuses.isEmpty ? 6 : 4
+        let visibleRows = min(max(viewModel.openPorts.count, 1), maxVisibleRows)
+        return CGFloat(visibleRows) * rowHeight
     }
 
     private var serviceSection: some View {
@@ -247,7 +254,7 @@ struct ContentView: View {
             Text("최근 변경")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(PTKTheme.faint)
-            Text(viewModel.recentPortChanges.prefix(2).map(\.displayText).joined(separator: "  ·  "))
+            Text(verbatim: recentChangesSummary)
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(PTKTheme.text)
                 .lineLimit(1)
@@ -261,7 +268,31 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .strokeBorder(PTKTheme.blue.opacity(0.18), lineWidth: 1)
         }
-        .help(viewModel.recentPortChanges.map(\.displayText).joined(separator: "\n"))
+        .help(recentChangesHelp)
+    }
+
+    private var recentChangesSummary: String {
+        viewModel.recentPortChanges
+            .prefix(2)
+            .map(recentChangeDisplayText)
+            .joined(separator: "  ·  ")
+    }
+
+    private var recentChangesHelp: String {
+        viewModel.recentPortChanges
+            .map(recentChangeDisplayText)
+            .joined(separator: "\n")
+    }
+
+    private func recentChangeDisplayText(_ change: PortChange) -> String {
+        var parts = ["\(change.port)", change.kind.label]
+        if let processName = change.processName, !processName.isEmpty {
+            parts.append(processName.ptkDisplayProcessName)
+        }
+        if let pid = change.pid {
+            parts.append("PID \(pid)")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var watchedPortsSummary: String {

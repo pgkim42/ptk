@@ -15,14 +15,14 @@ struct PortRowView: View {
                     .fill(PTKTheme.green)
                     .frame(width: 7, height: 7)
 
-                Text("\(status.port)")
+                Text(verbatim: "\(status.port)")
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundStyle(PTKTheme.text)
                     .lineLimit(1)
                     .frame(width: 46, alignment: .leading)
 
                 if let pid = status.pid {
-                    Text("PID \(pid)")
+                    Text(verbatim: "PID \(pid)")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(PTKTheme.muted)
                         .lineLimit(1)
@@ -35,12 +35,13 @@ struct PortRowView: View {
                         .frame(width: 68, alignment: .leading)
                 }
 
-                if let processName = status.processName, !processName.isEmpty {
-                    Text(processName)
+                if let processDisplayName {
+                    Text(verbatim: processDisplayName)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(PTKTheme.text)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        .help(processHelpText)
                 } else {
                     Text("unknown")
                         .font(.system(size: 12, weight: .medium))
@@ -112,5 +113,24 @@ struct PortRowView: View {
         .padding(.vertical, status.killUnavailableReason == nil ? 0 : 4)
         .frame(minHeight: status.killUnavailableReason == nil ? 29 : 44)
         .background(Color.clear)
+    }
+
+    private var processDisplayName: String? {
+        guard let processName = status.processName, !processName.isEmpty else {
+            return nil
+        }
+        return processName.ptkDisplayProcessName
+    }
+
+    private var processHelpText: String {
+        status.processName ?? ""
+    }
+}
+
+extension String {
+    var ptkDisplayProcessName: String {
+        split(separator: "/", omittingEmptySubsequences: true)
+            .last
+            .map(String.init) ?? self
     }
 }
