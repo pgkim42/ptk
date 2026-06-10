@@ -12,7 +12,7 @@ jobs:
     runs-on: macos-latest
     env:
       PTK_CI_WINDOWSERVER_TEST_SKIP: >-
-        PTKAppTests.MenuBarControllerTests/(startCanShowPanelImmediatelyForAutomation|panelSnapshotCanBeWrittenForAutomation|settingsSnapshotCanBeWrittenForAutomation|buttonInteractionSnapshotCanBeWrittenForAutomation)
+        PTKAppTests.MenuBarControllerTests/(startCanShowPanelImmediatelyForAutomation|panelClosedUsesQuietCadenceSlowerThanAllUserIntervals|panelReopenRestoresNormalTenSecondCadenceAndRefreshes|panelSnapshotCanBeWrittenForAutomation|panelSnapshotCanRenderDockerContainerRowsForAutomation|settingsSnapshotCanBeWrittenForAutomation|buttonInteractionSnapshotCanBeWrittenForAutomation)
 
     steps:
       - name: Check out repository
