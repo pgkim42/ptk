@@ -181,6 +181,11 @@ struct ContentView: View {
                         }
                         ForEach(group.statuses, id: \.displayIdentity) { status in
                             ServiceStatusRowView(status: status)
+                            if status.group == .builtIn, status.name == "Docker" {
+                                ForEach(viewModel.dockerContainerRows) { row in
+                                    DockerContainerPortRowView(row: row)
+                                }
+                            }
                         }
                     }
                 }
@@ -349,8 +354,7 @@ struct ContentView: View {
     }
 
     private var serviceSummary: String {
-        let runningCount = viewModel.serviceStatuses.filter { $0.state == .running }.count
-        return "\(runningCount)/\(viewModel.serviceStatuses.count)"
+        viewModel.serviceStatusSummary
     }
 
     private func iconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {

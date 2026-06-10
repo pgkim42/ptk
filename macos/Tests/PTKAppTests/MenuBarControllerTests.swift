@@ -90,6 +90,36 @@ import Testing
         #expect(controller.viewModel.openPorts.allSatisfy { $0.isOpen })
     }
 
+    @Test func refreshStoresDockerContainerRowsFromServiceSnapshot() {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        let dockerRows = [
+            DockerContainerPortRow(
+                id: "container-api",
+                name: "api",
+                detail: "4000 -> 4000"
+            )
+        ]
+        let controller = MenuBarController(
+            settings: settings,
+            scanner: PortScanner(
+                connector: FakeSocketConnector(openPorts: []),
+                lookup: ProcessLookup(runner: FakeProcessRunner())
+            ),
+            serviceSnapshotLoader: { completion in
+                completion(ServiceSnapshot(
+                    statuses: [ServiceStatus(name: "Docker", detail: "Daemon", state: .running)],
+                    dockerContainerRows: dockerRows
+                ))
+            }
+        )
+
+        controller.performRefresh()
+
+        #expect(controller.viewModel.serviceStatuses.map(\.name) == ["Docker"])
+        #expect(controller.viewModel.dockerContainerRows == dockerRows)
+    }
+
     @Test func refreshRecordsRecentPortChangesAfterInitialBaseline() {
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.watchedPortsExpression = "3000,3001"
@@ -213,6 +243,50 @@ import Testing
         try controller.writePanelSnapshot(to: snapshotURL)
 
         let attributes = try FileManager.default.attributesOfItem(atPath: snapshotURL.path)
+        #expect((attributes[.size] as? Int ?? 0) > 0)
+    }
+
+    @Test func panelSnapshotCanRenderDockerContainerRowsForAutomation() throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.theme = .dark
+        settings.watchedPortsExpression = "3000"
+        let controller = MenuBarController(
+            settings: settings,
+            scanner: PortScanner(
+                connector: FakeSocketConnector(openPorts: []),
+                lookup: ProcessLookup(runner: FakeProcessRunner())
+            ),
+            serviceSnapshotLoader: { completion in
+                completion(ServiceSnapshot(
+                    statuses: [
+                        ServiceStatus(name: "Docker", detail: "Daemon", state: .running),
+                        ServiceStatus(name: "PostgreSQL", detail: "Port 5432", state: .stopped)
+                    ],
+                    dockerContainerRows: [
+                        DockerContainerPortRow(
+                            id: "container-very-long-api-name",
+                            name: "very-long-api-container-name",
+                            detail: "4000 -> 4000, 9229 -> 9229, 9230 -> 9230, +1"
+                        ),
+                        DockerContainerPortRow(
+                            id: "container-web",
+                            name: "web",
+                            detail: "3000 -> 80"
+                        )
+                    ]
+                ))
+            }
+        )
+        defer { controller.stop() }
+        let snapshotURL = FileManager.default.temporaryDirectory
+            .appending(path: "ptk-docker-container-rows-snapshot-test-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: snapshotURL) }
+
+        controller.start(showPanelOnLaunch: true)
+        try controller.writePanelSnapshot(to: snapshotURL)
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: snapshotURL.path)
+        #expect(controller.viewModel.dockerContainerRows.count == 2)
         #expect((attributes[.size] as? Int ?? 0) > 0)
     }
 
@@ -431,6 +505,21 @@ import Testing
         #expect(viewModel.groupedServiceStatuses.map(\.title) == ["Built-in", "Custom"])
         #expect(viewModel.groupedServiceStatuses[0].statuses.map(\.name) == ["Docker"])
         #expect(viewModel.groupedServiceStatuses[1].statuses.map(\.name) == ["RabbitMQ"])
+    }
+
+    @Test func serviceSummaryExcludesDockerContainerRows() {
+        let viewModel = makeViewModel()
+        viewModel.serviceStatuses = [
+            ServiceStatus(name: "Docker", detail: "Daemon", state: .running),
+            ServiceStatus(name: "PostgreSQL", detail: "Port 5432", state: .stopped)
+        ]
+        viewModel.dockerContainerRows = [
+            DockerContainerPortRow(id: "container-api", name: "api", detail: "4000 -> 4000"),
+            DockerContainerPortRow(id: "container-web", name: "web", detail: "3000 -> 80")
+        ]
+
+        #expect(viewModel.serviceStatusSummary == "1/2")
+        #expect(viewModel.groupedServiceStatuses[0].statuses.count == 2)
     }
 
 

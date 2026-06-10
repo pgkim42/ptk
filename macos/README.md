@@ -7,7 +7,7 @@
 - `PTKApp`: AppKit 메뉴 막대 앱 셸 진입점
 - `PTKCore/Shell`: AIO 상태바 앱 공통 로직
 - `PTKCore/Features/PortMonitor`: 포트 파싱, 스캔, 프로세스 조회, 종료 안전 로직
-- `PTKCore/Features/ServiceMonitor`: Docker daemon과 주요 로컬 DB 포트 상태 표시 로직
+- `PTKCore/Features/ServiceMonitor`: Docker daemon, Docker published port, 주요 로컬 DB 포트 상태 표시 로직
 - `PTKCoreTests`: core 단위 테스트
 
 ## UI 동작
@@ -19,6 +19,11 @@ action에 남겨 둡니다.
 
 서비스 상태 행은 읽기 전용 지표이며, 중지 상태는 로컬 개발 환경에서 흔한
 상태이므로 경고보다 낮은 톤으로 표시합니다.
+
+Docker daemon이 실행 중이면 Docker 행 아래에 host에 publish된 container
+포트를 읽기 전용 하위 행으로 표시합니다. 하위 행은 stop/kill action과
+연결하지 않고, Services running/total 카운터에도 포함하지 않습니다.
+포트 표기는 `host -> container` 형식을 유지합니다.
 
 저장된 감시 포트 프로필은 패널에서 빠르게 전환할 수 있고, 사용자 정의
 서비스는 기본 서비스와 구분되는 read-only 그룹으로 표시합니다. 종료할 수

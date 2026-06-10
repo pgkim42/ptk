@@ -14,7 +14,7 @@ orchestrator. It watches common development ports, shows the verified listener
 details it can safely identify, and keeps destructive process termination behind
 a fail-closed safety model.
 
-The first tool in PTK is a **local port monitor**. It watches a configurable set of development ports, shows which ones are currently listening, identifies the owning process when possible, and lets you terminate only the processes that can be verified safely.
+The first tool in PTK is a **local port monitor** with a read-only local services glance. It watches a configurable set of development ports, shows which ones are currently listening, identifies the owning process when possible, surfaces Docker-published container ports, and lets you terminate only the processes that can be verified safely.
 
 PTK is currently a Swift-only macOS app. The old Rust/Tauri/Node runtime has been removed from the active product path; the app now builds and runs from the Swift Package under `macos/`.
 
@@ -32,6 +32,7 @@ tool stays trustworthy as it grows.
 
 ## Status
 
+- Current release line: `0.5.0`
 - Platform: macOS 13+
 - Runtime: Swift, AppKit, SwiftUI
 - Entry point: `macos/`
@@ -76,6 +77,7 @@ The panel can show:
 - parse or lookup errors without hiding the rest of the panel
 - quick profile switching for saved watched-port profiles
 - kill-unavailable explanations with next-check hints
+- read-only Docker published-port child rows in the Services section
 
 ### Service Status
 
@@ -83,7 +85,7 @@ PTK also shows read-only status for common local development services:
 
 | Service | Check |
 | --- | --- |
-| Docker | Docker daemon availability |
+| Docker | Docker daemon availability and published container ports |
 | PostgreSQL | port `5432` |
 | MySQL | port `3306` |
 | Redis | port `6379` |
@@ -93,6 +95,12 @@ These rows are status indicators only. PTK does not start, stop, restart, or
 manage Docker containers or database services. Additional read-only service port
 checks can be saved in settings for tools such as RabbitMQ, Elasticsearch,
 MinIO, or LocalStack.
+
+When Docker is running, PTK also shows child rows under the Docker service row
+for running containers with host-published ports. The display is always
+`host -> container`, such as `3000 -> 80` or `4000 -> 4000`. Containers without
+published host ports are hidden, and Docker child rows are not included in the
+Services running/total counter.
 
 Custom service checks remain read-only and are visually grouped separately from
 built-in services when present.
@@ -180,7 +188,7 @@ When changing the default profile, keep these files in sync:
 
 ## Install
 
-Download `PTK-macos-0.1.0-unsigned.dmg` from GitHub Releases.
+Download `PTK-macos-0.5.0-unsigned.dmg` from GitHub Releases.
 
 1. Open the DMG.
 2. Drag `PTK.app` to `Applications`.
@@ -195,7 +203,7 @@ Gatekeeper blocks the normal double-click launch.
 PTK appears in the macOS menu bar after launch instead of opening a normal app
 window.
 
-PTK also publishes `PTK-macos-0.1.0-unsigned.zip` for users who prefer a plain
+PTK also publishes `PTK-macos-0.5.0-unsigned.zip` for users who prefer a plain
 archive. Unzip it, move `PTK.app` to `/Applications`, then use the same first
 launch flow.
 
@@ -277,7 +285,7 @@ macos/
 │           │   ├── Services/    # lsof/ps lookup, scan, kill safety
 │           │   └── Settings/    # UserDefaults-backed settings
 │           └── ServiceMonitor/
-│               └── Services/    # Docker and local DB status checks
+│               └── Services/    # Docker ports and local DB status checks
 └── Tests/
     ├── PTKAppTests/
     └── PTKCoreTests/
@@ -310,6 +318,7 @@ Current test coverage focuses on:
 - refresh scheduling
 - settings persistence and validation
 - Docker and database status classification
+- Docker published-port parsing and read-only child rows
 - service command timeout handling
 - app view model behavior
 

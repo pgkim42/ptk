@@ -68,3 +68,38 @@ struct ServiceStatusRowView: View {
         }
     }
 }
+
+struct DockerContainerPortRowView: View {
+    let row: DockerContainerPortRow
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Spacer()
+                .frame(width: 12)
+
+            Image(systemName: row.isSummary ? "ellipsis" : "arrow.turn.down.right")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(PTKTheme.faint)
+                .frame(width: 12)
+
+            Text(row.name)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(row.isSummary ? PTKTheme.faint : PTKTheme.text)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: 92, alignment: .leading)
+
+            Text(row.detail)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(PTKTheme.muted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 24)
+        .background(PTKTheme.card.opacity(0.28))
+        .help(row.isSummary ? row.detail : "\(row.name) \(row.detail)")
+    }
+}

@@ -51,7 +51,7 @@ assert_contains README.md "A native macOS menu bar utility for safely inspecting
 assert_contains README.md "![PTK menu bar panel](docs/assets/ptk-panel.png)"
 assert_contains README.md "## Why PTK?"
 assert_contains README.md "## Project Health"
-assert_contains README.md "PTK-macos-0.1.0-unsigned.dmg"
+assert_contains README.md "PTK-macos-0.5.0-unsigned.dmg"
 assert_contains README.md "This release is unsigned"
 assert_contains README.md "PTK does not include automatic updates yet"
 assert_contains README.ko.md "SPDX-License-Identifier: 0BSD"
@@ -64,7 +64,7 @@ assert_contains README.ko.md "로컬 개발 포트를 안전하게 확인하고 
 assert_contains README.ko.md "![PTK 메뉴 막대 패널](docs/assets/ptk-panel.png)"
 assert_contains README.ko.md "## 왜 PTK인가?"
 assert_contains README.ko.md "## 프로젝트 상태"
-assert_contains README.ko.md "PTK-macos-0.1.0-unsigned.dmg"
+assert_contains README.ko.md "PTK-macos-0.5.0-unsigned.dmg"
 assert_contains README.ko.md "현재 릴리스는 서명되지 않았습니다"
 assert_contains README.ko.md "아직 자동 업데이트를 포함하지 않습니다"
 assert_file docs/assets/ptk-panel.png

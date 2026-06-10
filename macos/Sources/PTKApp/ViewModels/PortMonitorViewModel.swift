@@ -96,6 +96,7 @@ struct PortChangePresenter {
 final class PortMonitorViewModel: ObservableObject {
     @Published var statuses: [PortStatus] = []
     @Published var serviceStatuses: [ServiceStatus] = []
+    @Published var dockerContainerRows: [DockerContainerPortRow] = []
     @Published var recentPortChanges: [PortChange] = []
     @Published var errorMessage: String?
 
@@ -183,6 +184,11 @@ final class PortMonitorViewModel: ObservableObject {
             ServiceStatusGroup(id: .builtIn, title: ServiceGroup.builtIn.label, statuses: builtInStatuses),
             ServiceStatusGroup(id: .custom, title: ServiceGroup.custom.label, statuses: customStatuses)
         ].filter { !$0.statuses.isEmpty }
+    }
+
+    var serviceStatusSummary: String {
+        let runningCount = serviceStatuses.filter { $0.state == .running }.count
+        return "\(runningCount)/\(serviceStatuses.count)"
     }
 
     func refresh() {

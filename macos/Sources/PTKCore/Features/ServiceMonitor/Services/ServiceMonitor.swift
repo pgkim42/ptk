@@ -50,6 +50,107 @@ public struct ServiceStatus: Equatable, Sendable {
     }
 }
 
+public struct DockerPublishedPort: Equatable, Hashable, Sendable {
+    public let hostPort: String
+    public let containerPort: String
+    public let sortPort: UInt16
+
+    public init(hostPort: String, containerPort: String, sortPort: UInt16) {
+        self.hostPort = hostPort
+        self.containerPort = containerPort
+        self.sortPort = sortPort
+    }
+
+    public var displayText: String {
+        "\(hostPort) -> \(containerPort)"
+    }
+}
+
+public struct DockerContainerPublishedPorts: Equatable, Identifiable, Sendable {
+    public let name: String
+    public let publishedPorts: [DockerPublishedPort]
+
+    public var id: String { name }
+
+    public init(name: String, publishedPorts: [DockerPublishedPort]) {
+        self.name = name
+        self.publishedPorts = publishedPorts.sorted { lhs, rhs in
+            if lhs.sortPort == rhs.sortPort {
+                return lhs.displayText < rhs.displayText
+            }
+            return lhs.sortPort < rhs.sortPort
+        }
+    }
+
+    public var lowestHostPort: UInt16 {
+        publishedPorts.map(\.sortPort).min() ?? UInt16.max
+    }
+}
+
+public struct DockerContainerPortRow: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let detail: String
+    public let isSummary: Bool
+
+    public init(id: String, name: String, detail: String, isSummary: Bool = false) {
+        self.id = id
+        self.name = name
+        self.detail = detail
+        self.isSummary = isSummary
+    }
+
+    public static func displayRows(
+        for containers: [DockerContainerPublishedPorts],
+        maxContainers: Int = 5,
+        maxMappingsPerContainer: Int = 3
+    ) -> [DockerContainerPortRow] {
+        let sortedContainers = containers.sorted { lhs, rhs in
+            if lhs.lowestHostPort == rhs.lowestHostPort {
+                return lhs.name < rhs.name
+            }
+            return lhs.lowestHostPort < rhs.lowestHostPort
+        }
+        let visibleContainers = sortedContainers.prefix(maxContainers)
+        var rows = visibleContainers.map { container in
+            DockerContainerPortRow(
+                id: "container-\(container.name)",
+                name: container.name,
+                detail: portSummary(for: container.publishedPorts, maxMappings: maxMappingsPerContainer)
+            )
+        }
+        let hiddenCount = sortedContainers.count - visibleContainers.count
+        if hiddenCount > 0 {
+            rows.append(DockerContainerPortRow(
+                id: "container-more-\(hiddenCount)",
+                name: "+\(hiddenCount) more",
+                detail: "\(hiddenCount) hidden container\(hiddenCount == 1 ? "" : "s")",
+                isSummary: true
+            ))
+        }
+        return rows
+    }
+
+    private static func portSummary(for ports: [DockerPublishedPort], maxMappings: Int) -> String {
+        var parts = ports.prefix(maxMappings).map(\.displayText)
+        let hiddenCount = ports.count - parts.count
+        if hiddenCount > 0 {
+            parts.append("+\(hiddenCount)")
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+public struct ServiceSnapshot: Equatable, Sendable {
+    public let statuses: [ServiceStatus]
+    public let dockerContainerRows: [DockerContainerPortRow]
+
+    public init(statuses: [ServiceStatus], dockerContainerRows: [DockerContainerPortRow] = []) {
+        self.statuses = statuses
+        self.dockerContainerRows = dockerContainerRows
+    }
+}
+
 public struct ServiceCommandResult: Equatable, Sendable {
     public let exitCode: Int32
     public let stdout: String
@@ -75,6 +176,73 @@ public protocol ServiceCommandRunning: Sendable {
 
 public enum ServiceCommandError: Error, Equatable, Sendable {
     case timedOut
+}
+
+public struct DockerPublishedPortParser: Sendable {
+    public init() {}
+
+    public func parse(_ output: String) -> [DockerContainerPublishedPorts] {
+        output.split(separator: "\n", omittingEmptySubsequences: false)
+            .compactMap(parseLine)
+            .sorted { lhs, rhs in
+                if lhs.lowestHostPort == rhs.lowestHostPort {
+                    return lhs.name < rhs.name
+                }
+                return lhs.lowestHostPort < rhs.lowestHostPort
+            }
+    }
+
+    private func parseLine(_ line: Substring) -> DockerContainerPublishedPorts? {
+        let columns = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
+        guard columns.count == 2 else { return nil }
+        let name = String(columns[0])
+        let portsText = columns[1]
+        guard !name.isEmpty, !portsText.isEmpty else { return nil }
+
+        var seen = Set<DockerPublishedPort>()
+        let publishedPorts = portsText
+            .split(separator: ",")
+            .compactMap { parsePortSegment($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .filter { seen.insert($0).inserted }
+
+        guard !publishedPorts.isEmpty else { return nil }
+        return DockerContainerPublishedPorts(name: name, publishedPorts: publishedPorts)
+    }
+
+    private func parsePortSegment(_ segment: String) -> DockerPublishedPort? {
+        guard let arrowRange = segment.range(of: "->") else { return nil }
+        let hostSide = String(segment[..<arrowRange.lowerBound])
+        let containerSide = String(segment[arrowRange.upperBound...])
+        guard
+            let hostPort = publishedHostPort(from: hostSide),
+            let containerPort = containerPort(from: containerSide),
+            let sortPort = lowerBoundPort(from: hostPort)
+        else { return nil }
+
+        return DockerPublishedPort(hostPort: hostPort, containerPort: containerPort, sortPort: sortPort)
+    }
+
+    private func publishedHostPort(from hostSide: String) -> String? {
+        let portText: String
+        if let colonIndex = hostSide.lastIndex(of: ":") {
+            portText = String(hostSide[hostSide.index(after: colonIndex)...])
+        } else {
+            portText = hostSide
+        }
+        guard lowerBoundPort(from: portText) != nil else { return nil }
+        return portText
+    }
+
+    private func containerPort(from containerSide: String) -> String? {
+        let portText = containerSide.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? containerSide
+        guard lowerBoundPort(from: portText) != nil else { return nil }
+        return portText
+    }
+
+    private func lowerBoundPort(from text: String) -> UInt16? {
+        let lowerBound = text.split(separator: "-", maxSplits: 1).first.map(String.init) ?? text
+        return UInt16(lowerBound)
+    }
 }
 
 public protocol ServiceProcess: AnyObject, Sendable {
@@ -222,6 +390,12 @@ public struct ServiceMonitor: Sendable {
         [dockerStatus()] + databaseStatuses()
     }
 
+    public func scanWithDetails() -> ServiceSnapshot {
+        let docker = dockerStatus()
+        let dockerContainerRows = docker.state == .running ? collectDockerContainerRows() : []
+        return ServiceSnapshot(statuses: [docker] + databaseStatuses(), dockerContainerRows: dockerContainerRows)
+    }
+
     public func dockerStatus() -> ServiceStatus {
         let result: ServiceCommandResult
         do {
@@ -243,6 +417,22 @@ public struct ServiceMonitor: Sendable {
             return ServiceStatus(name: "Docker", detail: "Command unavailable", state: .unavailable)
         }
         return ServiceStatus(name: "Docker", detail: "Daemon", state: .stopped)
+    }
+
+    private func collectDockerContainerRows() -> [DockerContainerPortRow] {
+        do {
+            let result = try runner.run(
+                "docker",
+                arguments: ["ps", "--format", "{{.Names}}\t{{.Ports}}"],
+                timeout: dockerCommandTimeout,
+                environmentPath: ServiceMonitor.dockerEnvironmentPath
+            )
+            guard result.succeeded else { return [] }
+            let containers = DockerPublishedPortParser().parse(result.stdout)
+            return DockerContainerPortRow.displayRows(for: containers)
+        } catch {
+            return []
+        }
     }
 
     public func databaseStatuses(host: String = "127.0.0.1", group: ServiceGroup = .builtIn) -> [ServiceStatus] {

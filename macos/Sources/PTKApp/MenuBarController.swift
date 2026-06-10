@@ -3,6 +3,7 @@ import SwiftUI
 import PTKCore
 
 typealias ServiceStatusLoader = (@escaping @MainActor ([ServiceStatus]) -> Void) -> Void
+typealias ServiceSnapshotLoader = (@escaping @MainActor (ServiceSnapshot) -> Void) -> Void
 
 struct ServiceStatusCompositionPolicy: Equatable, Sendable {
     let builtInDatabasePorts: Set<UInt16>
@@ -35,18 +36,21 @@ private final class DefaultServiceStatusLoader {
         self.compositionPolicy = compositionPolicy
     }
 
-    func load(completion: @escaping @MainActor ([ServiceStatus]) -> Void) {
+    func load(completion: @escaping @MainActor (ServiceSnapshot) -> Void) {
         let serviceMonitor = serviceMonitor
         let compositionPolicy = compositionPolicy
         let customEndpoints = compositionPolicy.customEndpointsExcludingBuiltInPorts(customEndpoints())
         DispatchQueue.global(qos: .utility).async {
-            let defaultStatuses = serviceMonitor.scan()
+            let defaultSnapshot = serviceMonitor.scanWithDetails()
             let customStatuses = customEndpoints.isEmpty
                 ? []
                 : ServiceMonitor(databaseEndpoints: customEndpoints).databaseStatuses(group: .custom)
-            let statuses = compositionPolicy.compose(defaultStatuses: defaultStatuses, customStatuses: customStatuses)
+            let statuses = compositionPolicy.compose(defaultStatuses: defaultSnapshot.statuses, customStatuses: customStatuses)
             Task { @MainActor in
-                completion(statuses)
+                completion(ServiceSnapshot(
+                    statuses: statuses,
+                    dockerContainerRows: defaultSnapshot.dockerContainerRows
+                ))
             }
         }
     }
@@ -58,7 +62,7 @@ final class MenuBarController: NSObject {
     private let parser: PortRangeParser
     private let scanner: PortScanner
     private let killService: KillService
-    private let serviceStatusLoader: ServiceStatusLoader
+    private let serviceSnapshotLoader: ServiceSnapshotLoader
     private var refreshScheduler: RefreshScheduler?
     private var statusItem: NSStatusItem?
     private var refreshTimer: Timer?
@@ -67,6 +71,7 @@ final class MenuBarController: NSObject {
     private var hostingController: NSHostingController<ContentView>?
     private var statuses: [PortStatus] = []
     private var serviceStatuses: [ServiceStatus] = []
+    private var dockerContainerRows: [DockerContainerPortRow] = []
     private var previousStatusesForChanges: [PortStatus]?
     private var recentPortChanges: [PortChange] = []
     private var errorMessage: String?
@@ -85,7 +90,8 @@ final class MenuBarController: NSObject {
         scanner: PortScanner = PortScanner(),
         serviceMonitor: ServiceMonitor = ServiceMonitor(),
         killService: KillService = KillService(),
-        serviceStatusLoader: ServiceStatusLoader? = nil
+        serviceStatusLoader: ServiceStatusLoader? = nil,
+        serviceSnapshotLoader: ServiceSnapshotLoader? = nil
     ) {
         self.settings = settings
         self.parser = parser
@@ -95,7 +101,17 @@ final class MenuBarController: NSObject {
             serviceMonitor: serviceMonitor,
             customEndpoints: { settings.customServiceEndpoints }
         )
-        self.serviceStatusLoader = serviceStatusLoader ?? defaultServiceStatusLoader.load(completion:)
+        if let serviceSnapshotLoader {
+            self.serviceSnapshotLoader = serviceSnapshotLoader
+        } else if let serviceStatusLoader {
+            self.serviceSnapshotLoader = { completion in
+                serviceStatusLoader { statuses in
+                    completion(ServiceSnapshot(statuses: statuses))
+                }
+            }
+        } else {
+            self.serviceSnapshotLoader = defaultServiceStatusLoader.load(completion:)
+        }
         super.init()
         self.refreshScheduler = RefreshScheduler(interval: settings.refreshInterval) { [weak self] in
             self?.performRefresh()
@@ -342,9 +358,10 @@ final class MenuBarController: NSObject {
     }
 
     private func loadServiceStatuses() {
-        serviceStatusLoader { [weak self] statuses in
+        serviceSnapshotLoader { [weak self] snapshot in
             guard let self else { return }
-            self.serviceStatuses = statuses
+            self.serviceStatuses = snapshot.statuses
+            self.dockerContainerRows = snapshot.dockerContainerRows
             self.updateViewModel()
         }
     }
@@ -362,6 +379,7 @@ final class MenuBarController: NSObject {
     private func updateViewModel() {
         viewModel.statuses = statuses
         viewModel.serviceStatuses = serviceStatuses
+        viewModel.dockerContainerRows = dockerContainerRows
         viewModel.recentPortChanges = recentPortChanges
         viewModel.errorMessage = errorMessage
         statusItem?.button?.title = viewModel.menuBarTitle

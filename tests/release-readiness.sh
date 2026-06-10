@@ -39,10 +39,10 @@ assert_contains docs/roadmap.md "force kill"
 
 assert_contains README.md "CHANGELOG.md"
 assert_contains README.md "docs/roadmap.md"
-assert_contains README.md "PTK-macos-0.1.0-unsigned.dmg"
+assert_contains README.md "PTK-macos-0.5.0-unsigned.dmg"
 assert_contains README.ko.md "CHANGELOG.md"
 assert_contains README.ko.md "docs/roadmap.md"
-assert_contains README.ko.md "PTK-macos-0.1.0-unsigned.dmg"
+assert_contains README.ko.md "PTK-macos-0.5.0-unsigned.dmg"
 assert_contains tests/package-readiness.sh "package-readiness"
 
 tests/package-readiness.sh
