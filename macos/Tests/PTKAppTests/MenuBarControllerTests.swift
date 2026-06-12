@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Testing
 @testable import PTKApp
 @testable import PTKCore
@@ -88,6 +89,7 @@ import Testing
         #expect(controller.viewModel.statuses.count == 2)
         #expect(controller.viewModel.openPorts.count == 2)
         #expect(controller.viewModel.openPorts.allSatisfy { $0.isOpen })
+        #expect(controller.viewModel.menuBarStatusContent.countText == "2")
     }
 
     @Test func refreshStoresDockerContainerRowsFromServiceSnapshot() {
@@ -118,6 +120,32 @@ import Testing
 
         #expect(controller.viewModel.serviceStatuses.map(\.name) == ["Docker"])
         #expect(controller.viewModel.dockerContainerRows == dockerRows)
+    }
+
+    @Test func refreshAppliesSymbolMenuBarButtonState() {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000,3001"
+        let controller = MenuBarController(
+            settings: settings,
+            scanner: PortScanner(
+                connector: FakeSocketConnector(openPorts: [3000, 3001]),
+                lookup: ProcessLookup(runner: FakeProcessRunner())
+            ),
+            serviceStatusLoader: { completion in
+                completion([])
+            }
+        )
+        defer { controller.stop() }
+
+        controller.start()
+        controller.performRefresh()
+
+        #expect(controller.menuBarButtonStateForTesting == MenuBarButtonState(
+            title: "2",
+            hasImage: true,
+            toolTip: "PTK · 2 open ports",
+            accessibilityLabel: "PTK, 2 open ports"
+        ))
     }
 
     @Test func refreshRecordsRecentPortChangesAfterInitialBaseline() {
@@ -348,7 +376,7 @@ import Testing
         #expect(ContentView.panelSize.height == 420)
     }
 
-    @Test func openPortsFiltersAndSorts() {
+    @Test func menuBarStatusCountsOpenPorts() {
         let viewModel = makeViewModel()
         viewModel.statuses = [
             PortStatus(port: 3000, isOpen: false),
@@ -359,17 +387,24 @@ import Testing
         #expect(viewModel.openPorts.count == 2)
         #expect(viewModel.openPorts[0].port == 3001)
         #expect(viewModel.openPorts[1].port == 3002)
-        #expect(viewModel.menuBarTitle == "PTK 2")
+        #expect(viewModel.menuBarStatusContent == MenuBarStatusContent(
+            symbolName: "network",
+            countText: "2",
+            toolTip: "PTK · 2 open ports",
+            accessibilityLabel: "PTK, 2 open ports"
+        ))
     }
 
-    @Test func menuBarTitleShowsCount() {
+    @Test func menuBarStatusUsesSingularCopyForOneOpenPort() {
         let viewModel = makeViewModel()
         viewModel.statuses = [
             PortStatus(port: 3000, isOpen: true),
             PortStatus(port: 3001, isOpen: false)
         ]
 
-        #expect(viewModel.menuBarTitle == "PTK 1")
+        #expect(viewModel.menuBarStatusContent.countText == "1")
+        #expect(viewModel.menuBarStatusContent.toolTip == "PTK · 1 open port")
+        #expect(viewModel.menuBarStatusContent.accessibilityLabel == "PTK, 1 open port")
     }
 
     @Test func killFlowSetsAndClearsConfirmationTarget() {

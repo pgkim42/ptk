@@ -63,7 +63,7 @@ an update server yet.
 
 PTK periodically scans the configured port expression and shows only the watched ports that are currently open.
 
-The menu bar title shows the open watched-port count, such as `PTK 0` or `PTK 2`.
+The menu bar status item shows a network icon with the open watched-port count, such as `0` or `2`, while its tooltip keeps the PTK name and open-port summary.
 
 The panel can show:
 

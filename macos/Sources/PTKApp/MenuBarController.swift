@@ -141,6 +141,7 @@ final class MenuBarController: NSObject {
         item.menu = nil
         item.button?.action = #selector(togglePopover)
         item.button?.target = self
+        configureStatusButton()
 
         setupPanel()
         refreshScheduler?.triggerManualRefresh()
@@ -259,6 +260,31 @@ final class MenuBarController: NSObject {
             self?.applyQuietCadence()
         }
         panel = utilityPanel
+    }
+
+    private func configureStatusButton() {
+        guard let button = statusItem?.button else { return }
+        let content = viewModel.menuBarStatusContent
+        button.title = content.countText
+        button.image = NSImage(
+            systemSymbolName: content.symbolName,
+            accessibilityDescription: content.accessibilityLabel
+        )
+        button.image?.isTemplate = true
+        button.image?.setName(NSImage.Name(content.symbolName))
+        button.imagePosition = .imageLeading
+        button.toolTip = content.toolTip
+        button.setAccessibilityLabel(content.accessibilityLabel)
+    }
+
+    var menuBarButtonStateForTesting: MenuBarButtonState? {
+        guard let button = statusItem?.button else { return nil }
+        return MenuBarButtonState(
+            title: button.title,
+            hasImage: button.image != nil,
+            toolTip: button.toolTip,
+            accessibilityLabel: button.accessibilityLabel()
+        )
     }
 
     @objc func togglePopover(_ sender: Any?) {
@@ -382,7 +408,7 @@ final class MenuBarController: NSObject {
         viewModel.dockerContainerRows = dockerContainerRows
         viewModel.recentPortChanges = recentPortChanges
         viewModel.errorMessage = errorMessage
-        statusItem?.button?.title = viewModel.menuBarTitle
+        configureStatusButton()
     }
 }
 
@@ -396,4 +422,11 @@ private final class PTKPanel: NSPanel {
         super.orderOut(sender)
         onOrderOut?()
     }
+}
+
+struct MenuBarButtonState: Equatable {
+    let title: String
+    let hasImage: Bool
+    let toolTip: String?
+    let accessibilityLabel: String?
 }

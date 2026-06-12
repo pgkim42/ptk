@@ -92,6 +92,12 @@ struct PortChangePresenter {
         }
     }
 }
+struct MenuBarStatusContent: Equatable {
+    let symbolName: String
+    let countText: String
+    let toolTip: String
+    let accessibilityLabel: String
+}
 @MainActor
 final class PortMonitorViewModel: ObservableObject {
     @Published var statuses: [PortStatus] = []
@@ -110,8 +116,15 @@ final class PortMonitorViewModel: ObservableObject {
     @Published var killErrorMessage: String?
     @Published var isShowingSettings = false
 
-    var menuBarTitle: String {
-        "\(AppDefaults.appName) \(statuses.filter(\.isOpen).count)"
+    var menuBarStatusContent: MenuBarStatusContent {
+        let openCount = openPorts.count
+        let suffix = openCount == 1 ? "open port" : "open ports"
+        return MenuBarStatusContent(
+            symbolName: "network",
+            countText: "\(openCount)",
+            toolTip: "\(AppDefaults.appName) · \(openCount) \(suffix)",
+            accessibilityLabel: "\(AppDefaults.appName), \(openCount) \(suffix)"
+        )
     }
 
     var openPorts: [PortStatus] {
