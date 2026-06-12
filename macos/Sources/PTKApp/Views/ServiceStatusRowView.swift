@@ -71,6 +71,13 @@ struct ServiceStatusRowView: View {
 
 struct DockerContainerPortRowView: View {
     let row: DockerContainerPortRow
+    let onCopyURL: () -> Void
+
+    init(row: DockerContainerPortRow, onCopyURL: @escaping () -> Void = {}) {
+        self.row = row
+        self.onCopyURL = onCopyURL
+    }
+
 
     var body: some View {
         HStack(spacing: 7) {
@@ -95,11 +102,45 @@ struct DockerContainerPortRowView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
 
+
+            if !row.isSummary, let candidate = row.copyCandidates.first, row.copyCandidates.count == 1 {
+                Button(action: onCopyURL) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 20))
+                .help("Docker URL 복사: \(candidate.urlString)")
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 9)
         .frame(height: 24)
         .background(PTKTheme.card.opacity(0.28))
         .help(row.isSummary ? row.detail : "\(row.name) \(row.detail)")
+    }
+}
+
+struct ServiceStatusEmptyRowView: View {
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(PTKTheme.faint)
+                .frame(width: 12)
+
+            Text(message)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(PTKTheme.muted)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(PTKTheme.card.opacity(0.18))
+        .help(message)
     }
 }

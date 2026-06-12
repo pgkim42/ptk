@@ -27,22 +27,36 @@ public enum ServiceGroup: String, Equatable, Sendable {
     }
 }
 
+public enum ServiceKind: Equatable, Sendable {
+    case dockerDaemon
+    case databasePort
+}
+
+
 
 public struct ServiceStatus: Equatable, Sendable {
     public let name: String
     public let detail: String
     public let state: ServiceState
     public let group: ServiceGroup
+    public let kind: ServiceKind
 
-    public init(name: String, detail: String, state: ServiceState, group: ServiceGroup = .builtIn) {
+    public init(
+        name: String,
+        detail: String,
+        state: ServiceState,
+        group: ServiceGroup = .builtIn,
+        kind: ServiceKind? = nil
+    ) {
         self.name = name
         self.detail = detail
         self.state = state
         self.group = group
+        self.kind = kind ?? (group == .builtIn && name == "Docker" ? .dockerDaemon : .databasePort)
     }
 
     public var displayIdentity: String {
-        "\(group.rawValue)-\(name.lowercased())-\(detail)"
+        "\(group.rawValue)-\(kind)-\(name.lowercased())-\(detail)"
     }
 
     public var displayText: String {
@@ -64,7 +78,23 @@ public struct DockerPublishedPort: Equatable, Hashable, Sendable {
     public var displayText: String {
         "\(hostPort) -> \(containerPort)"
     }
+
+    public var localhostURLString: String? {
+        guard UInt16(hostPort) != nil else { return nil }
+        return "http://localhost:\(hostPort)"
+    }
 }
+
+public struct DockerPortCopyCandidate: Equatable, Hashable, Sendable {
+    public let label: String
+    public let urlString: String
+
+    public init(label: String, urlString: String) {
+        self.label = label
+        self.urlString = urlString
+    }
+}
+
 
 public struct DockerContainerPublishedPorts: Equatable, Identifiable, Sendable {
     public let name: String
@@ -92,12 +122,20 @@ public struct DockerContainerPortRow: Equatable, Identifiable, Sendable {
     public let name: String
     public let detail: String
     public let isSummary: Bool
+    public let copyCandidates: [DockerPortCopyCandidate]
 
-    public init(id: String, name: String, detail: String, isSummary: Bool = false) {
+    public init(
+        id: String,
+        name: String,
+        detail: String,
+        isSummary: Bool = false,
+        copyCandidates: [DockerPortCopyCandidate] = []
+    ) {
         self.id = id
         self.name = name
         self.detail = detail
         self.isSummary = isSummary
+        self.copyCandidates = copyCandidates
     }
 
     public static func displayRows(
@@ -116,7 +154,8 @@ public struct DockerContainerPortRow: Equatable, Identifiable, Sendable {
             DockerContainerPortRow(
                 id: "container-\(container.name)",
                 name: container.name,
-                detail: portSummary(for: container.publishedPorts, maxMappings: maxMappingsPerContainer)
+                detail: portSummary(for: container.publishedPorts, maxMappings: maxMappingsPerContainer),
+                copyCandidates: copyCandidates(for: container.publishedPorts, maxMappings: maxMappingsPerContainer)
             )
         }
         let hiddenCount = sortedContainers.count - visibleContainers.count
@@ -138,6 +177,16 @@ public struct DockerContainerPortRow: Equatable, Identifiable, Sendable {
             parts.append("+\(hiddenCount)")
         }
         return parts.joined(separator: ", ")
+    }
+
+    private static func copyCandidates(for ports: [DockerPublishedPort], maxMappings: Int) -> [DockerPortCopyCandidate] {
+        guard ports.count <= maxMappings else { return [] }
+        let candidates = ports.compactMap { port -> DockerPortCopyCandidate? in
+            guard let urlString = port.localhostURLString else { return nil }
+            return DockerPortCopyCandidate(label: port.hostPort, urlString: urlString)
+        }
+        guard candidates.count == 1, candidates.count == ports.count else { return [] }
+        return candidates
     }
 }
 
@@ -406,17 +455,17 @@ public struct ServiceMonitor: Sendable {
                 environmentPath: ServiceMonitor.dockerEnvironmentPath
             )
         } catch ServiceCommandError.timedOut {
-            return ServiceStatus(name: "Docker", detail: "Daemon timeout", state: .unavailable)
+            return ServiceStatus(name: "Docker", detail: "Daemon timeout", state: .unavailable, kind: .dockerDaemon)
         } catch {
-            return ServiceStatus(name: "Docker", detail: "Command unavailable", state: .unavailable)
+            return ServiceStatus(name: "Docker", detail: "Command unavailable", state: .unavailable, kind: .dockerDaemon)
         }
         if result.succeeded {
-            return ServiceStatus(name: "Docker", detail: "Daemon", state: .running)
+            return ServiceStatus(name: "Docker", detail: "Daemon", state: .running, kind: .dockerDaemon)
         }
         if result.exitCode == 127 || result.stderr.localizedCaseInsensitiveContains("no such file") {
-            return ServiceStatus(name: "Docker", detail: "Command unavailable", state: .unavailable)
+            return ServiceStatus(name: "Docker", detail: "Command unavailable", state: .unavailable, kind: .dockerDaemon)
         }
-        return ServiceStatus(name: "Docker", detail: "Daemon", state: .stopped)
+        return ServiceStatus(name: "Docker", detail: "Daemon", state: .stopped, kind: .dockerDaemon)
     }
 
     private func collectDockerContainerRows() -> [DockerContainerPortRow] {

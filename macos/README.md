@@ -21,12 +21,15 @@ action에 남겨 둡니다.
 상태이므로 경고보다 낮은 톤으로 표시합니다.
 
 Docker daemon이 실행 중이면 Docker 행 아래에 host에 publish된 container
-포트를 읽기 전용 하위 행으로 표시합니다. 하위 행은 stop/kill action과
-연결하지 않고, Services running/total 카운터에도 포함하지 않습니다.
-포트 표기는 `host -> container` 형식을 유지합니다.
+포트를 읽기 전용 하위 행으로 표시합니다. 단일 숫자 host 포트는
+`http://localhost:<port>`로 복사할 수 있지만, range/요약/숨김/모호한
+다중 포트 행은 복사 action을 노출하지 않습니다. 하위 행은 stop/kill
+action과 연결하지 않고, Services running/total 카운터에도 포함하지
+않습니다. 포트 표기는 `host -> container` 형식을 유지합니다.
 
 저장된 감시 포트 프로필은 패널에서 빠르게 전환할 수 있고, 사용자 정의
-서비스는 기본 서비스와 구분되는 read-only 그룹으로 표시합니다. 종료할 수
+서비스는 기본 서비스와 구분되는 read-only 그룹으로 표시합니다. 사용자 정의
+서비스가 없으면 Settings 안내 help 행만 표시합니다. 종료할 수
 없는 포트는 ambiguous listener, PID/process 누락, mismatch 같은 이유와
 다음 확인 힌트를 보여주되 새 종료 옵션은 만들지 않습니다.
 

@@ -98,12 +98,16 @@ MinIO, or LocalStack.
 
 When Docker is running, PTK also shows child rows under the Docker service row
 for running containers with host-published ports. The display is always
-`host -> container`, such as `3000 -> 80` or `4000 -> 4000`. Containers without
-published host ports are hidden, and Docker child rows are not included in the
-Services running/total counter.
+`host -> container`, such as `3000 -> 80` or `4000 -> 4000`. A single numeric
+host port can be copied as `http://localhost:<port>` from the Docker child row.
+Range, hidden, summary, invalid, or ambiguous multi-port rows do not expose a
+copy action. Containers without published host ports are hidden, and Docker
+child rows are not included in the Services running/total counter.
 
 Custom service checks remain read-only and are visually grouped separately from
-built-in services when present.
+built-in services. When no custom services are saved, the compact panel shows a
+short help row that points to Settings without adding a panel-side mutation
+action.
 
 ### Safe Process Termination
 

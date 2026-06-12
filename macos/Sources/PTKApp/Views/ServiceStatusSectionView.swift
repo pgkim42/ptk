@@ -11,17 +11,24 @@ struct ServiceStatusSectionView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(viewModel.groupedServiceStatuses) { group in
-                        if viewModel.groupedServiceStatuses.count > 1 {
+                        if viewModel.showsServiceGroupHeaders {
                             PanelServiceGroupHeaderView(title: group.title)
                         }
                         ForEach(group.statuses, id: \.displayIdentity) { status in
                             ServiceStatusRowView(status: status)
-                            if status.group == .builtIn, status.name == "Docker" {
+                            if status.group == .builtIn, status.kind == .dockerDaemon {
                                 ForEach(viewModel.dockerContainerRows) { row in
-                                    DockerContainerPortRowView(row: row)
+                                    DockerContainerPortRowView(
+                                        row: row,
+                                        onCopyURL: { viewModel.copyDockerContainerURL(for: row) }
+                                    )
                                 }
                             }
                         }
+                    }
+                    if let customServiceEmptyMessage = viewModel.customServiceEmptyMessage {
+                        PanelServiceGroupHeaderView(title: ServiceGroup.custom.label)
+                        ServiceStatusEmptyRowView(message: customServiceEmptyMessage)
                     }
                 }
             }

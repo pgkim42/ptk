@@ -34,12 +34,14 @@ into a service orchestrator.
 Goal: make PTK feel like a small local diagnostic console while keeping the
 menu bar surface compact and read-only service boundary intact.
 
-- Quick switching for saved watched-port profiles.
-- Read-only custom service grouping and labels.
-- Clear kill-unavailable explanations for ambiguous, missing, or mismatched
-  process lookup states.
-- Panel-open normal refresh and panel-closed quiet refresh, where quiet cadence
-  stays slower than every user-selectable refresh interval.
+- Priority 1: service diagnostic UX. Keep custom services read-only, grouped
+  separately from built-in checks, and clear about empty/error states; expose
+  Docker host URL copy only for unambiguous single numeric published ports.
+- Priority 2: port-change notification and summary polish for opened, closed,
+  and changed watched ports.
+- Lower v2: stack bundle/profile-service linking remains manual-only; PTK must
+  not switch profiles automatically or infer service lifecycle intent.
+- Launch/distribution polish stays deferred behind the diagnostic-console core.
 - Keep the same non-goals: no unsafe kill overrides, no service lifecycle
   management, no automatic profile switching, and no new dashboard window.
 

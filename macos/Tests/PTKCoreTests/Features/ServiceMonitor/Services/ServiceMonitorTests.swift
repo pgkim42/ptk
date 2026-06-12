@@ -70,6 +70,8 @@ import Testing
         #expect(rows[0].publishedPorts.map(\.displayText) == ["3000 -> 80", "3443 -> 443"])
         #expect(rows[1].publishedPorts.map(\.displayText) == ["4000 -> 4000", "9229 -> 9229"])
         #expect(rows[2].publishedPorts.map(\.displayText) == ["5432-5433 -> 5432-5433"])
+        #expect(rows[0].publishedPorts[0].localhostURLString == "http://localhost:3000")
+        #expect(rows[2].publishedPorts[0].localhostURLString == nil)
     }
 
     @Test func dockerPublishedPortRowsCollapseMappingsAndContainersForDisplay() {
@@ -102,6 +104,37 @@ import Testing
         #expect(displayRows.map(\.name) == ["mail", "web", "api", "db", "redis", "+1 more"])
         #expect(displayRows[2].detail == "4000 -> 4000, 9229 -> 9229, 9230 -> 9230, +1")
         #expect(displayRows.last?.detail == "1 hidden container")
+        #expect(displayRows[1].copyCandidates == [
+            DockerPortCopyCandidate(label: "3000", urlString: "http://localhost:3000")
+        ])
+        #expect(displayRows[2].copyCandidates.isEmpty)
+        #expect(displayRows.last?.copyCandidates.isEmpty == true)
+    }
+
+    @Test func dockerPublishedPortRowsExposeOnlyUnambiguousVisibleCopyURLs() {
+        let rows = DockerContainerPortRow.displayRows(for: [
+            DockerContainerPublishedPorts(name: "web", publishedPorts: [
+                DockerPublishedPort(hostPort: "3000", containerPort: "80", sortPort: 3000)
+            ]),
+            DockerContainerPublishedPorts(name: "api", publishedPorts: [
+                DockerPublishedPort(hostPort: "4000", containerPort: "4000", sortPort: 4000),
+                DockerPublishedPort(hostPort: "9229", containerPort: "9229", sortPort: 9229)
+            ]),
+            DockerContainerPublishedPorts(name: "db", publishedPorts: [
+                DockerPublishedPort(hostPort: "5432-5433", containerPort: "5432-5433", sortPort: 5432)
+            ]),
+            DockerContainerPublishedPorts(name: "hidden", publishedPorts: [
+                DockerPublishedPort(hostPort: "5000", containerPort: "5000", sortPort: 5000),
+                DockerPublishedPort(hostPort: "5001", containerPort: "5001", sortPort: 5001)
+            ])
+        ], maxContainers: 4, maxMappingsPerContainer: 1)
+
+        #expect(rows.first { $0.name == "web" }?.copyCandidates == [
+            DockerPortCopyCandidate(label: "3000", urlString: "http://localhost:3000")
+        ])
+        #expect(rows.first { $0.name == "api" }?.copyCandidates.isEmpty == true)
+        #expect(rows.first { $0.name == "db" }?.copyCandidates.isEmpty == true)
+        #expect(rows.first { $0.name == "hidden" }?.copyCandidates.isEmpty == true)
     }
 
     @Test func serviceSnapshotCollectsDockerPortsOnlyWhenDockerIsRunning() {

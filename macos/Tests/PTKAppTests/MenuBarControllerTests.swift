@@ -507,6 +507,31 @@ import Testing
         #expect(viewModel.groupedServiceStatuses[1].statuses.map(\.name) == ["RabbitMQ"])
     }
 
+    @Test func customServiceEmptyMessageAppearsOnlyBeforeCustomEndpointsExist() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+        let viewModel = makeViewModel(settings: settings)
+
+        #expect(viewModel.customServiceEmptyMessage == "No custom services yet. Add read-only port checks in Settings.")
+
+        try viewModel.saveCustomServiceEndpoint(name: "RabbitMQ", portText: "5672")
+
+        #expect(viewModel.customServiceEmptyMessage == nil)
+        #expect(viewModel.showsServiceGroupHeaders == false)
+    }
+
+    @Test func customEmptyStateKeepsBuiltInGroupHeaderVisible() {
+        let viewModel = makeViewModel()
+        viewModel.serviceStatuses = [
+            ServiceStatus(name: "Docker", detail: "Daemon", state: .running),
+            ServiceStatus(name: "PostgreSQL", detail: "Port 5432", state: .stopped)
+        ]
+
+        #expect(viewModel.groupedServiceStatuses.map(\.title) == ["Built-in"])
+        #expect(viewModel.customServiceEmptyMessage != nil)
+        #expect(viewModel.showsServiceGroupHeaders)
+    }
+
     @Test func serviceSummaryExcludesDockerContainerRows() {
         let viewModel = makeViewModel()
         viewModel.serviceStatuses = [
@@ -520,6 +545,45 @@ import Testing
 
         #expect(viewModel.serviceStatusSummary == "1/2")
         #expect(viewModel.groupedServiceStatuses[0].statuses.count == 2)
+        #expect(viewModel.groupedServiceStatuses[0].statuses[0].kind == .dockerDaemon)
+    }
+
+    @Test func dockerContainerURLCopyUsesStructuredCandidateOnly() {
+        var copiedText: String?
+        let viewModel = makeViewModel(onCopyText: { copiedText = $0 })
+        let copyable = DockerContainerPortRow(
+            id: "container-web",
+            name: "web",
+            detail: "3000 -> 80",
+            copyCandidates: [
+                DockerPortCopyCandidate(label: "3000", urlString: "http://localhost:3000")
+            ]
+        )
+        let ambiguous = DockerContainerPortRow(
+            id: "container-api",
+            name: "api",
+            detail: "4000 -> 4000, 9229 -> 9229"
+        )
+        let malformedSummary = DockerContainerPortRow(
+            id: "container-more-1",
+            name: "+1 more",
+            detail: "1 hidden container",
+            isSummary: true,
+            copyCandidates: [
+                DockerPortCopyCandidate(label: "3000", urlString: "http://localhost:3000")
+            ]
+        )
+
+        viewModel.copyDockerContainerURL(for: copyable)
+        #expect(copiedText == "http://localhost:3000")
+
+        copiedText = nil
+        viewModel.copyDockerContainerURL(for: ambiguous)
+        #expect(copiedText == nil)
+
+        copiedText = nil
+        viewModel.copyDockerContainerURL(for: malformedSummary)
+        #expect(copiedText == nil)
     }
 
 

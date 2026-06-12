@@ -186,6 +186,16 @@ final class PortMonitorViewModel: ObservableObject {
         ].filter { !$0.statuses.isEmpty }
     }
 
+    var customServiceEmptyMessage: String? {
+        customServiceEndpoints.isEmpty
+            ? "No custom services yet. Add read-only port checks in Settings."
+            : nil
+    }
+
+    var showsServiceGroupHeaders: Bool {
+        groupedServiceStatuses.count > 1 || customServiceEmptyMessage != nil
+    }
+
     var serviceStatusSummary: String {
         let runningCount = serviceStatuses.filter { $0.state == .running }.count
         return "\(runningCount)/\(serviceStatuses.count)"
@@ -275,6 +285,11 @@ final class PortMonitorViewModel: ObservableObject {
 
     func copyLocalhostURL(for status: PortStatus) {
         onCopyText(localhostURL(for: status.port).absoluteString)
+    }
+
+    func copyDockerContainerURL(for row: DockerContainerPortRow) {
+        guard !row.isSummary, row.copyCandidates.count == 1, let candidate = row.copyCandidates.first else { return }
+        onCopyText(candidate.urlString)
     }
 
     func copyPortDetails(for status: PortStatus) {
