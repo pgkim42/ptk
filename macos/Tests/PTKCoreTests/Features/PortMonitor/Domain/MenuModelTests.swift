@@ -1,3 +1,5 @@
+import Foundation
+
 import Testing
 @testable import PTKCore
 
@@ -78,6 +80,7 @@ import Testing
     }
 
     @Test func portChangesDetectOpenClosedAndProcessUpdates() {
+        let occurredAt = Date(timeIntervalSince1970: 1_700_000_000)
         let previous = [
             PortStatus(port: 3000, isOpen: false),
             PortStatus(port: 3001, isOpen: true, pid: 10, processName: "node"),
@@ -89,12 +92,28 @@ import Testing
             PortStatus(port: 3002, isOpen: true, pid: 21, processName: "vite")
         ]
 
-        let changes = PortChange.detect(previous: previous, current: current)
+        let changes = PortChange.detect(previous: previous, current: current, occurredAt: occurredAt)
 
         #expect(changes.map(\.kind) == [.opened, .closed, .changed])
         #expect(changes.map(\.port) == [3000, 3001, 3002])
         #expect(changes.map(\.pid) == [30, nil, 21])
         #expect(changes.map(\.processName) == ["rails", nil, "vite"])
+        #expect(changes.allSatisfy { $0.occurredAt == occurredAt })
+    }
+
+    @Test func portChangeIdentityIncludesOccurrenceTime() {
+        let firstDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let secondDate = Date(timeIntervalSince1970: 1_700_000_060)
+
+        let first = PortChange(port: 3000, kind: .opened, pid: 30, processName: "node", occurredAt: firstDate)
+        let repeated = PortChange(port: 3000, kind: .opened, pid: 30, processName: "node", occurredAt: secondDate)
+        let sameAsFirst = PortChange(port: 3000, kind: .opened, pid: 30, processName: "node", occurredAt: firstDate)
+
+        #expect(first.id != repeated.id)
+        #expect(first == sameAsFirst)
+        #expect(first != repeated)
+        #expect(PortChange(port: 3000, kind: .opened, occurredAt: firstDate).id !=
+            PortChange(port: 3000, kind: .opened, pid: 0, processName: "", occurredAt: firstDate).id)
     }
 
     @Test func errorStateDoesNotHideRows() {

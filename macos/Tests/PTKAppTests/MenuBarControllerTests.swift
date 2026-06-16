@@ -175,6 +175,64 @@ import Testing
         #expect(controller.viewModel.recentPortChanges.map(\.port).prefix(2) == [3000, 3000])
     }
 
+    @Test func recentPortChangesAreCappedAtFourNewestFirst() {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000-3004"
+        let connector = MutableFakeSocketConnector(openPorts: [])
+        let controller = MenuBarController(
+            settings: settings,
+            scanner: PortScanner(
+                connector: connector,
+                lookup: ProcessLookup(runner: FakeProcessRunner())
+            ),
+            serviceStatusLoader: { _ in }
+        )
+
+        controller.performRefresh()
+        for port in UInt16(3000)...UInt16(3004) {
+            connector.openPorts.insert(port)
+            controller.performRefresh()
+        }
+
+        #expect(controller.viewModel.recentPortChanges.count == 4)
+        #expect(controller.viewModel.recentPortChanges.map(\.kind) == [.opened, .opened, .opened, .opened])
+        #expect(controller.viewModel.recentPortChanges.map(\.port) == [3004, 3003, 3002, 3001])
+    }
+
+    @Test func recentChangesDoNotAlterMenuBarStatusContent() {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        let connector = MutableFakeSocketConnector(openPorts: [])
+        let controller = MenuBarController(
+            settings: settings,
+            scanner: PortScanner(
+                connector: connector,
+                lookup: ProcessLookup(runner: FakeProcessRunner())
+            ),
+            serviceStatusLoader: { _ in }
+        )
+
+        controller.performRefresh()
+        let baselineContent = controller.viewModel.menuBarStatusContent
+
+        connector.openPorts = [3000]
+        controller.performRefresh()
+
+        #expect(controller.viewModel.recentPortChanges.map(\.kind) == [.opened])
+        #expect(controller.viewModel.menuBarStatusContent == MenuBarStatusContent(
+            symbolName: "network",
+            countText: "1",
+            toolTip: "PTK · 1 open port",
+            accessibilityLabel: "PTK, 1 open port"
+        ))
+        #expect(baselineContent == MenuBarStatusContent(
+            symbolName: "network",
+            countText: "0",
+            toolTip: "PTK · 0 open ports",
+            accessibilityLabel: "PTK, 0 open ports"
+        ))
+    }
+
     @Test func refreshSetsErrorOnBadExpression() {
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.watchedPortsExpression = "invalid-!!!"
@@ -272,6 +330,34 @@ import Testing
 
         let attributes = try FileManager.default.attributesOfItem(atPath: snapshotURL.path)
         #expect((attributes[.size] as? Int ?? 0) > 0)
+    }
+
+    @Test func panelSnapshotRendersRecentPortChangesForAutomation() throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.theme = .dark
+        settings.watchedPortsExpression = "3000"
+        let connector = MutableFakeSocketConnector(openPorts: [])
+        let controller = MenuBarController(
+            settings: settings,
+            scanner: PortScanner(
+                connector: connector,
+                lookup: ProcessLookup(runner: FakeProcessRunner())
+            ),
+            serviceStatusLoader: { completion in completion([]) }
+        )
+        defer { controller.stop() }
+        let snapshotURL = URL(fileURLWithPath: "/tmp/ptk-recent-changes-panel-snapshot.png")
+        try? FileManager.default.removeItem(at: snapshotURL)
+
+        controller.start(showPanelOnLaunch: true)
+        controller.performRefresh()
+        connector.openPorts = [3000]
+        controller.performRefresh()
+        try controller.writePanelSnapshot(to: snapshotURL)
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: snapshotURL.path)
+        #expect((attributes[.size] as? Int ?? 0) > 0)
+        #expect(controller.viewModel.recentPortChanges.map(\.kind) == [.opened])
     }
 
     @Test func panelSnapshotCanRenderDockerContainerRowsForAutomation() throws {
@@ -405,6 +491,36 @@ import Testing
         #expect(viewModel.menuBarStatusContent.countText == "1")
         #expect(viewModel.menuBarStatusContent.toolTip == "PTK · 1 open port")
         #expect(viewModel.menuBarStatusContent.accessibilityLabel == "PTK, 1 open port")
+    }
+
+    @Test func recentPortChangePresenterRendersKindIconAndTimeContext() {
+        let presenter = PortChangePresenter()
+        let occurredAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let now = Date(timeIntervalSince1970: 1_700_000_125)
+
+        let opened = presenter.displayData(
+            for: PortChange(port: 3000, kind: .opened, pid: 11, processName: "/usr/local/bin/node", occurredAt: occurredAt),
+            relativeTo: now
+        )
+        let closed = presenter.displayData(
+            for: PortChange(port: 3001, kind: .closed, occurredAt: occurredAt),
+            relativeTo: now
+        )
+        let changed = presenter.displayData(
+            for: PortChange(port: 3002, kind: .changed, pid: 21, processName: "vite", occurredAt: occurredAt),
+            relativeTo: now
+        )
+
+        #expect(opened.systemImageName != closed.systemImageName)
+        #expect(closed.systemImageName != changed.systemImageName)
+        #expect(opened.primaryText == "Port 3000 열림")
+        #expect(closed.primaryText == "Port 3001 닫힘")
+        #expect(changed.primaryText == "Port 3002 변경")
+        #expect(opened.detailText == "node · PID 11")
+        #expect(changed.detailText == "vite · PID 21")
+        #expect(opened.timeText == "2분 전")
+        #expect(opened.accessibilityText.contains("Port 3000 열림"))
+        #expect(opened.accessibilityText.contains("2분 전"))
     }
 
     @Test func killFlowSetsAndClearsConfirmationTarget() {

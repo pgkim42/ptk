@@ -69,16 +69,51 @@ extension String {
     }
 }
 
+struct RecentPortChangeDisplayData: Equatable, Sendable {
+    let systemImageName: String
+    let primaryText: String
+    let detailText: String?
+    let timeText: String
+    let accessibilityText: String
+}
+
 struct PortChangePresenter {
-    func displayText(for change: PortChange) -> String {
-        var parts = ["\(change.port)", label(for: change.kind)]
+    func displayData(for change: PortChange, relativeTo now: Date = Date()) -> RecentPortChangeDisplayData {
+        let primaryText = "Port \(change.port) \(label(for: change.kind))"
+        let detailText = detailText(for: change)
+        let timeText = relativeTimeText(from: change.occurredAt, to: now)
+        let accessibilityParts = ([primaryText, detailText, timeText] as [String?]).compactMap { part -> String? in
+            guard let part, !part.isEmpty else { return nil }
+            return part
+        }
+        return RecentPortChangeDisplayData(
+            systemImageName: systemImageName(for: change.kind),
+            primaryText: primaryText,
+            detailText: detailText,
+            timeText: timeText,
+            accessibilityText: accessibilityParts.joined(separator: ", ")
+        )
+    }
+
+    func displayText(for change: PortChange, relativeTo now: Date = Date()) -> String {
+        let data = displayData(for: change, relativeTo: now)
+        return ([data.primaryText, data.detailText, data.timeText] as [String?])
+            .compactMap { part -> String? in
+                guard let part, !part.isEmpty else { return nil }
+                return part
+            }
+            .joined(separator: " · ")
+    }
+
+    private func detailText(for change: PortChange) -> String? {
+        var parts: [String] = []
         if let processName = change.processName, !processName.isEmpty {
             parts.append(processName.ptkDisplayProcessName)
         }
         if let pid = change.pid {
             parts.append("PID \(pid)")
         }
-        return parts.joined(separator: " · ")
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private func label(for kind: PortChangeKind) -> String {
@@ -90,6 +125,33 @@ struct PortChangePresenter {
         case .changed:
             "변경"
         }
+    }
+
+    private func systemImageName(for kind: PortChangeKind) -> String {
+        switch kind {
+        case .opened:
+            "arrow.up.circle.fill"
+        case .closed:
+            "arrow.down.circle.fill"
+        case .changed:
+            "arrow.triangle.2.circlepath.circle.fill"
+        }
+    }
+
+    private func relativeTimeText(from occurredAt: Date, to now: Date) -> String {
+        let elapsed = max(0, Int(now.timeIntervalSince(occurredAt)))
+        if elapsed < 60 {
+            return "방금"
+        }
+        let minutes = elapsed / 60
+        if minutes < 60 {
+            return "\(minutes)분 전"
+        }
+        let hours = minutes / 60
+        if hours < 24 {
+            return "\(hours)시간 전"
+        }
+        return "\(hours / 24)일 전"
     }
 }
 struct MenuBarStatusContent: Equatable {

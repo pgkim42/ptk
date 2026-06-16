@@ -1,3 +1,5 @@
+import Foundation
+
 public struct PortStatus: Equatable, Sendable {
     public let port: UInt16
     public let isOpen: Bool
@@ -61,16 +63,30 @@ public struct PortChange: Equatable, Identifiable, Sendable {
     public let kind: PortChangeKind
     public let pid: Int?
     public let processName: String?
+    public let occurredAt: Date
 
-    public init(port: UInt16, kind: PortChangeKind, pid: Int? = nil, processName: String? = nil) {
-        self.id = "\(port)-\(kind.rawValue)-\(pid ?? 0)-\(processName ?? "")"
+    public init(
+        port: UInt16,
+        kind: PortChangeKind,
+        pid: Int? = nil,
+        processName: String? = nil,
+        occurredAt: Date = Date()
+    ) {
+        let pidIdentity = pid.map { "pid:\($0)" } ?? "pid:nil"
+        let processIdentity = processName.map { "process:\($0)" } ?? "process:nil"
+        self.id = "\(port)-\(kind.rawValue)-\(pidIdentity)-\(processIdentity)-occurred:\(occurredAt.timeIntervalSince1970)"
         self.port = port
         self.kind = kind
         self.pid = pid
         self.processName = processName
+        self.occurredAt = occurredAt
     }
 
-    public static func detect(previous: [PortStatus], current: [PortStatus]) -> [PortChange] {
+    public static func detect(
+        previous: [PortStatus],
+        current: [PortStatus],
+        occurredAt: Date = Date()
+    ) -> [PortChange] {
         let previousByPort = Dictionary(uniqueKeysWithValues: previous.map { ($0.port, $0) })
         return current.compactMap { status in
             guard let previousStatus = previousByPort[status.port] else { return nil }
@@ -79,7 +95,8 @@ public struct PortChange: Equatable, Identifiable, Sendable {
                     port: status.port,
                     kind: status.isOpen ? .opened : .closed,
                     pid: status.pid,
-                    processName: status.processName
+                    processName: status.processName,
+                    occurredAt: occurredAt
                 )
             }
             if status.isOpen,
@@ -88,7 +105,8 @@ public struct PortChange: Equatable, Identifiable, Sendable {
                     port: status.port,
                     kind: .changed,
                     pid: status.pid,
-                    processName: status.processName
+                    processName: status.processName,
+                    occurredAt: occurredAt
                 )
             }
             return nil

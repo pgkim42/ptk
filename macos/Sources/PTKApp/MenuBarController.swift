@@ -394,7 +394,12 @@ final class MenuBarController: NSObject {
 
     private func trackPortChanges(_ scannedStatuses: [PortStatus]) {
         if let previousStatusesForChanges {
-            let changes = PortChange.detect(previous: previousStatusesForChanges, current: scannedStatuses)
+            let occurredAt = Date()
+            let changes = PortChange.detect(
+                previous: previousStatusesForChanges,
+                current: scannedStatuses,
+                occurredAt: occurredAt
+            )
             if !changes.isEmpty {
                 recentPortChanges = Array((changes + recentPortChanges).prefix(4))
             }
