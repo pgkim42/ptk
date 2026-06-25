@@ -75,6 +75,7 @@ struct RecentPortChangeDisplayData: Equatable, Sendable {
     let detailText: String?
     let timeText: String
     let accessibilityText: String
+    let helpText: String
 }
 
 struct PortChangePresenter {
@@ -82,28 +83,17 @@ struct PortChangePresenter {
         let primaryText = "Port \(change.port) \(label(for: change.kind))"
         let detailText = detailText(for: change)
         let timeText = relativeTimeText(from: change.occurredAt, to: now)
-        let accessibilityParts = ([primaryText, detailText, timeText] as [String?]).compactMap { part -> String? in
-            guard let part, !part.isEmpty else { return nil }
-            return part
-        }
+        let contextText = joinedContextText(primaryText: primaryText, detailText: detailText, timeText: timeText)
         return RecentPortChangeDisplayData(
             systemImageName: systemImageName(for: change.kind),
             primaryText: primaryText,
             detailText: detailText,
             timeText: timeText,
-            accessibilityText: accessibilityParts.joined(separator: ", ")
+            accessibilityText: contextText,
+            helpText: contextText
         )
     }
 
-    func displayText(for change: PortChange, relativeTo now: Date = Date()) -> String {
-        let data = displayData(for: change, relativeTo: now)
-        return ([data.primaryText, data.detailText, data.timeText] as [String?])
-            .compactMap { part -> String? in
-                guard let part, !part.isEmpty else { return nil }
-                return part
-            }
-            .joined(separator: " · ")
-    }
 
     private func detailText(for change: PortChange) -> String? {
         var parts: [String] = []
@@ -114,6 +104,15 @@ struct PortChangePresenter {
             parts.append("PID \(pid)")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func joinedContextText(primaryText: String, detailText: String?, timeText: String) -> String {
+        ([primaryText, detailText, timeText] as [String?])
+            .compactMap { part -> String? in
+                guard let part, !part.isEmpty else { return nil }
+                return part
+            }
+            .joined(separator: " · ")
     }
 
     private func label(for kind: PortChangeKind) -> String {

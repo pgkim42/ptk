@@ -199,6 +199,49 @@ import Testing
         #expect(controller.viewModel.recentPortChanges.map(\.port) == [3004, 3003, 3002, 3001])
     }
 
+    @Test func recentPortChangesRecordProcessIdentityChangesNewestFirst() {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        let connector = MutableFakeSocketConnector(openPorts: [3000])
+        let runner = FakeProcessRunner()
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 0,
+            stdout: """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
+            """
+        )
+        runner.results["ps -p 111 -o comm="] = ProcessRunResult(exitCode: 0, stdout: "/usr/local/bin/node\n")
+        let controller = MenuBarController(
+            settings: settings,
+            scanner: PortScanner(
+                connector: connector,
+                lookup: ProcessLookup(runner: runner)
+            ),
+            serviceStatusLoader: { _ in }
+        )
+
+        controller.performRefresh()
+        #expect(controller.viewModel.recentPortChanges.isEmpty)
+
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 0,
+            stdout: """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            vite    222 me   1u IPv4 0x2    0t0      TCP *:3000 (LISTEN)
+            """
+        )
+        runner.results["ps -p 222 -o comm="] = ProcessRunResult(exitCode: 0, stdout: "vite\n")
+        controller.performRefresh()
+
+        let change = controller.viewModel.recentPortChanges.first
+        #expect(change?.kind == .changed)
+        #expect(change?.port == 3000)
+        #expect(change?.pid == 222)
+        #expect(change?.processName == "vite")
+        #expect(controller.viewModel.recentPortChanges.count == 1)
+    }
+
     @Test func recentChangesDoNotAlterMenuBarStatusContent() {
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.watchedPortsExpression = "3000"
@@ -346,8 +389,9 @@ import Testing
             serviceStatusLoader: { completion in completion([]) }
         )
         defer { controller.stop() }
-        let snapshotURL = URL(fileURLWithPath: "/tmp/ptk-recent-changes-panel-snapshot.png")
-        try? FileManager.default.removeItem(at: snapshotURL)
+        let snapshotURL = FileManager.default.temporaryDirectory
+            .appending(path: "ptk-recent-changes-panel-snapshot-test-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: snapshotURL) }
 
         controller.start(showPanelOnLaunch: true)
         controller.performRefresh()
@@ -521,6 +565,69 @@ import Testing
         #expect(opened.timeText == "2분 전")
         #expect(opened.accessibilityText.contains("Port 3000 열림"))
         #expect(opened.accessibilityText.contains("2분 전"))
+    }
+
+    @Test func recentPortChangePresenterHelpAndAccessibilityMirrorRowInformation() {
+        let presenter = PortChangePresenter()
+        let occurredAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let now = Date(timeIntervalSince1970: 1_700_003_700)
+
+        let withProcess = presenter.displayData(
+            for: PortChange(port: 5173, kind: .changed, pid: 42, processName: "/opt/homebrew/bin/vite", occurredAt: occurredAt),
+            relativeTo: now
+        )
+        let withoutProcess = presenter.displayData(
+            for: PortChange(port: 3000, kind: .closed, occurredAt: occurredAt),
+            relativeTo: now
+        )
+
+        #expect(withProcess.primaryText == "Port 5173 변경")
+        #expect(withProcess.detailText == "vite · PID 42")
+        #expect(withProcess.timeText == "1시간 전")
+        #expect(withProcess.helpText == "Port 5173 변경 · vite · PID 42 · 1시간 전")
+        #expect(withProcess.accessibilityText == withProcess.helpText)
+
+        #expect(withoutProcess.detailText == nil)
+        #expect(withoutProcess.helpText == "Port 3000 닫힘 · 1시간 전")
+        #expect(withoutProcess.accessibilityText == withoutProcess.helpText)
+    }
+
+    @Test func recentPortChangePresenterCoversRelativeTimeBoundaries() {
+        let presenter = PortChangePresenter()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        #expect(presenter.displayData(
+            for: PortChange(port: 3000, kind: .opened, occurredAt: Date(timeIntervalSince1970: 1_700_000_030)),
+            relativeTo: now
+        ).timeText == "방금")
+        #expect(presenter.displayData(
+            for: PortChange(port: 3000, kind: .opened, occurredAt: Date(timeIntervalSince1970: 1_699_999_941)),
+            relativeTo: now
+        ).timeText == "방금")
+        #expect(presenter.displayData(
+            for: PortChange(port: 3000, kind: .opened, occurredAt: Date(timeIntervalSince1970: 1_699_999_940)),
+            relativeTo: now
+        ).timeText == "1분 전")
+        #expect(presenter.displayData(
+            for: PortChange(port: 3000, kind: .opened, occurredAt: Date(timeIntervalSince1970: 1_699_996_401)),
+            relativeTo: now
+        ).timeText == "59분 전")
+        #expect(presenter.displayData(
+            for: PortChange(port: 3000, kind: .opened, occurredAt: Date(timeIntervalSince1970: 1_699_996_400)),
+            relativeTo: now
+        ).timeText == "1시간 전")
+        #expect(presenter.displayData(
+            for: PortChange(port: 3000, kind: .opened, occurredAt: Date(timeIntervalSince1970: 1_699_913_601)),
+            relativeTo: now
+        ).timeText == "23시간 전")
+        #expect(presenter.displayData(
+            for: PortChange(port: 3000, kind: .opened, occurredAt: Date(timeIntervalSince1970: 1_699_913_600)),
+            relativeTo: now
+        ).timeText == "1일 전")
+        #expect(presenter.displayData(
+            for: PortChange(port: 3000, kind: .opened, occurredAt: Date(timeIntervalSince1970: 1_699_740_800)),
+            relativeTo: now
+        ).timeText == "3일 전")
     }
 
     @Test func killFlowSetsAndClearsConfirmationTarget() {
@@ -852,8 +959,11 @@ import Testing
 }
 
 private final class FakeProcessRunner: ProcessRunning {
+    var results: [String: ProcessRunResult] = [:]
+
     func run(_ executable: String, arguments: [String]) throws -> ProcessRunResult {
-        ProcessRunResult(exitCode: 0, stdout: "")
+        let key = ([executable] + arguments).joined(separator: " ")
+        return results[key] ?? ProcessRunResult(exitCode: 0, stdout: "")
     }
 }
 

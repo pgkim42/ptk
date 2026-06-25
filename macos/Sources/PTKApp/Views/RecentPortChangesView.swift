@@ -5,6 +5,7 @@ struct RecentPortChangesView: View {
     @ObservedObject var viewModel: PortMonitorViewModel
 
     var body: some View {
+        let now = Date()
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
@@ -16,7 +17,7 @@ struct RecentPortChangesView: View {
             }
 
             ForEach(visibleChanges) { change in
-                let displayData = recentChangeDisplayData(change)
+                let displayData = recentChangeDisplayData(change, relativeTo: now)
                 HStack(spacing: 7) {
                     Image(systemName: displayData.systemImageName)
                         .font(.system(size: 10, weight: .semibold))
@@ -40,6 +41,7 @@ struct RecentPortChangesView: View {
                         .lineLimit(1)
                 }
                 .accessibilityLabel(displayData.accessibilityText)
+                .help(displayData.helpText)
             }
         }
         .padding(.horizontal, 9)
@@ -49,24 +51,20 @@ struct RecentPortChangesView: View {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .strokeBorder(PTKTheme.blue.opacity(0.18), lineWidth: 1)
         }
-        .help(recentChangesHelp)
+        .help(recentChangesHelp(relativeTo: now))
     }
 
     private var visibleChanges: ArraySlice<PortChange> {
         viewModel.recentPortChanges.prefix(4)
     }
 
-    private var recentChangesHelp: String {
+    private func recentChangesHelp(relativeTo now: Date) -> String {
         visibleChanges
-            .map(recentChangeDisplayText)
+            .map { recentChangeDisplayData($0, relativeTo: now).helpText }
             .joined(separator: "\n")
     }
 
-    private func recentChangeDisplayData(_ change: PortChange) -> RecentPortChangeDisplayData {
-        PortChangePresenter().displayData(for: change)
-    }
-
-    private func recentChangeDisplayText(_ change: PortChange) -> String {
-        PortChangePresenter().displayText(for: change)
+    private func recentChangeDisplayData(_ change: PortChange, relativeTo now: Date) -> RecentPortChangeDisplayData {
+        PortChangePresenter().displayData(for: change, relativeTo: now)
     }
 }
