@@ -3,9 +3,14 @@ import Foundation
 import Testing
 @testable import PTKCore
 
-struct FakeResolver: ProcessResolving {
-    var info: PortProcessInfo?
-    var error: Error?
+struct FakeResolver: ProcessResolving, Sendable {
+    let info: PortProcessInfo?
+    let error: (any Error)?
+
+    init(info: PortProcessInfo?, error: (any Error)? = nil) {
+        self.info = info
+        self.error = error
+    }
 
     func info(for port: UInt16) throws -> PortProcessInfo? {
         if let error { throw error }
@@ -13,13 +18,25 @@ struct FakeResolver: ProcessResolving {
     }
 }
 
-final class FakeTerminator: ProcessTerminating {
-    var terminatedPIDs: [Int] = []
-    var failureMessage: String?
+final class FakeTerminator: ProcessTerminating, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedTerminatedPIDs: [Int] = []
+    private var storedFailureMessage: String?
+
+    var terminatedPIDs: [Int] {
+        lock.withLock { storedTerminatedPIDs }
+    }
+
+    var failureMessage: String? {
+        get { lock.withLock { storedFailureMessage } }
+        set { lock.withLock { storedFailureMessage = newValue } }
+    }
 
     func terminate(pid: Int) -> String? {
-        terminatedPIDs.append(pid)
-        return failureMessage
+        lock.withLock {
+            storedTerminatedPIDs.append(pid)
+            return storedFailureMessage
+        }
     }
 }
 
@@ -77,13 +94,13 @@ struct FakeConfirmer: KillConfirming {
     }
 
     @Test func systemTerminatorSendsExactlyOneSIGTERM() {
-        var calls: [(pid: pid_t, signal: Int32)] = []
+        let recorder = SignalRecorder()
         let terminator = SystemProcessTerminator { pid, signal in
-            calls.append((pid, signal))
-            return 0
+            recorder.send(pid: pid, signal: signal)
         }
 
         #expect(terminator.terminate(pid: 111) == nil)
+        let calls = recorder.calls
         #expect(calls.count == 1)
         #expect(calls.first?.pid == pid_t(111))
         #expect(calls.first?.signal == SIGTERM)
@@ -191,7 +208,7 @@ struct FakeConfirmer: KillConfirming {
     }
 }
 
-private struct RevalidationProcessNameFailingRunner: ProcessRunning {
+private struct RevalidationProcessNameFailingRunner: ProcessRunning, Sendable {
     let error: ProcessRunnerError
 
     func run(
@@ -209,5 +226,21 @@ private struct RevalidationProcessNameFailingRunner: ProcessRunning {
             node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
             """
         )
+    }
+}
+
+private final class SignalRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedCalls: [(pid: pid_t, signal: Int32)] = []
+
+    var calls: [(pid: pid_t, signal: Int32)] {
+        lock.withLock { recordedCalls }
+    }
+
+    func send(pid: pid_t, signal: Int32) -> Int32 {
+        lock.withLock {
+            recordedCalls.append((pid, signal))
+        }
+        return 0
     }
 }

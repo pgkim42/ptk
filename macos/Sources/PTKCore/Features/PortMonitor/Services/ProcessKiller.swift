@@ -53,24 +53,24 @@ public enum KillOutcome: Equatable, Sendable {
     case terminated
 }
 
-public protocol ProcessResolving {
+public protocol ProcessResolving: Sendable {
     func info(for port: UInt16) throws -> PortProcessInfo?
 }
 
 extension ProcessLookup: ProcessResolving {}
 
-public protocol ProcessTerminating {
+public protocol ProcessTerminating: Sendable {
     func terminate(pid: Int) -> String?
 }
 
 public struct SystemProcessTerminator: ProcessTerminating {
-    private let signalSender: (pid_t, Int32) -> Int32
+    private let signalSender: @Sendable (pid_t, Int32) -> Int32
 
     public init() {
         signalSender = { Darwin.kill($0, $1) }
     }
 
-    init(signalSender: @escaping (pid_t, Int32) -> Int32) {
+    init(signalSender: @escaping @Sendable (pid_t, Int32) -> Int32) {
         self.signalSender = signalSender
     }
 
@@ -87,7 +87,7 @@ public protocol KillConfirming {
     func confirmKill(target: KillTarget) -> Bool
 }
 
-public struct KillService {
+public struct KillService: Sendable {
     private let resolver: ProcessResolving
     private let terminator: ProcessTerminating
 

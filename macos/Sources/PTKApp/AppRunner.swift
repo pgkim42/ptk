@@ -25,18 +25,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.snapshotKind = snapshotKind
         showPanelOnLaunch = environment["PTK_QA_SHOW_PANEL"] == "1" || snapshotURL != nil
         let scanner: PortScanner
-        let serviceSnapshotLoader: ServiceSnapshotLoader?
+        let serviceSnapshotWorker: ServiceSnapshotWorker?
         if snapshotKind == "panel-docker" {
             scanner = Self.dockerPanelSnapshotScanner
-            serviceSnapshotLoader = Self.dockerPanelSnapshotLoader(completion:)
+            serviceSnapshotWorker = { _ in Self.dockerPanelSnapshot() }
         } else {
             scanner = PortScanner()
-            serviceSnapshotLoader = nil
+            serviceSnapshotWorker = nil
         }
         menuBarController = MenuBarController(
             settings: settings,
             scanner: scanner,
-            serviceSnapshotLoader: serviceSnapshotLoader
+            serviceSnapshotWorker: serviceSnapshotWorker
         )
         super.init()
     }
@@ -48,10 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private static func dockerPanelSnapshotLoader(
-        completion: @escaping @MainActor (ServiceSnapshot) -> Void
-    ) {
-        completion(ServiceSnapshot(
+    nonisolated private static func dockerPanelSnapshot() -> ServiceSnapshot {
+        ServiceSnapshot(
             statuses: [
                 ServiceStatus(name: "Docker", detail: "Daemon", state: .running),
                 ServiceStatus(name: "PostgreSQL", detail: "Port 5432", state: .stopped),
@@ -69,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     detail: "4000 -> 4000, 9229 -> 9229"
                 )
             ]
-        ))
+        )
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

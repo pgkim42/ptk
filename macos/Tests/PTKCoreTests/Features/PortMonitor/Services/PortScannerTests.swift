@@ -102,8 +102,14 @@ node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
     }
 }
 
-private final class ProcessNameFailingRunner: ProcessRunning {
-    var results: [String: ProcessRunResult] = [:]
+private final class ProcessNameFailingRunner: ProcessRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedResults: [String: ProcessRunResult] = [:]
+
+    var results: [String: ProcessRunResult] {
+        get { lock.withLock { storedResults } }
+        set { lock.withLock { storedResults = newValue } }
+    }
 
     func run(
         _ executable: String,
@@ -114,10 +120,12 @@ private final class ProcessNameFailingRunner: ProcessRunning {
             throw ProcessRunnerError.timedOut
         }
         let key = ([executable] + arguments).joined(separator: " ")
-        return results[key] ?? ProcessRunResult(
-            exitCode: 1,
-            stdout: "",
-            stderr: "missing fake result"
-        )
+        return lock.withLock {
+            storedResults[key] ?? ProcessRunResult(
+                exitCode: 1,
+                stdout: "",
+                stderr: "missing fake result"
+            )
+        }
     }
 }

@@ -176,6 +176,8 @@ final class PortMonitorViewModel: ObservableObject {
     @Published var killConfirmationTarget: KillTarget?
     @Published var killErrorMessage: String?
     @Published var isShowingSettings = false
+    @Published var isRefreshing = false
+    @Published var isTerminatingProcess = false
 
     var menuBarStatusContent: MenuBarStatusContent {
         let openCount = openPorts.count
@@ -195,24 +197,26 @@ final class PortMonitorViewModel: ObservableObject {
     var hasError: Bool { errorMessage != nil }
 
     private let settings: AppSettings
-    private let killService: KillService
     private let parser: PortRangeParser
     private let onRefresh: () -> Void
+    private let onSettingsRefresh: () -> Void
+    private let onKill: @MainActor (KillTarget) async -> KillRequestResult
     private let onIntervalChange: (RefreshInterval) -> Void
     private let onOpenLocalhost: (URL) -> Void
     private let onCopyText: (String) -> Void
+    private var killRequestID: UUID?
 
     init(
         settings: AppSettings,
-        killService: KillService = KillService(),
         parser: PortRangeParser = PortRangeParser(),
         onRefresh: @escaping () -> Void,
+        onSettingsRefresh: @escaping () -> Void = {},
+        onKill: @escaping @MainActor (KillTarget) async -> KillRequestResult = { _ in .invalidated },
         onIntervalChange: @escaping (RefreshInterval) -> Void = { _ in },
         onOpenLocalhost: @escaping (URL) -> Void = { _ in },
         onCopyText: @escaping (String) -> Void = { _ in }
     ) {
         self.settings = settings
-        self.killService = killService
         self.parser = parser
         self.portExpression = settings.watchedPortsExpression
         self.refreshInterval = settings.refreshInterval
@@ -220,6 +224,8 @@ final class PortMonitorViewModel: ObservableObject {
         self.customPortProfiles = settings.customPortProfiles
         self.customServiceEndpoints = settings.customServiceEndpoints
         self.onRefresh = onRefresh
+        self.onSettingsRefresh = onSettingsRefresh
+        self.onKill = onKill
         self.onIntervalChange = onIntervalChange
         self.onOpenLocalhost = onOpenLocalhost
         self.onCopyText = onCopyText
@@ -285,24 +291,43 @@ final class PortMonitorViewModel: ObservableObject {
     }
 
     func confirmKill() {
-        guard let target = killConfirmationTarget else { return }
+        guard !isTerminatingProcess, let target = killConfirmationTarget else { return }
+        let requestID = UUID()
+        killRequestID = requestID
         killConfirmationTarget = nil
-        do {
-            try killService.terminateAfterRevalidation(target: target)
-        } catch {
-            killErrorMessage = "\(error)"
+        killErrorMessage = nil
+        isTerminatingProcess = true
+
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await self.onKill(target)
+            guard self.killRequestID == requestID else { return }
+            self.killRequestID = nil
+            self.isTerminatingProcess = false
+            switch result {
+            case .settled(let errorMessage):
+                self.killErrorMessage = errorMessage
+            case .invalidated:
+                self.killErrorMessage = nil
+            }
         }
-        onRefresh()
     }
 
     func cancelKill() {
         killConfirmationTarget = nil
     }
 
+    func cancelActiveWork() {
+        killRequestID = nil
+        killConfirmationTarget = nil
+        isRefreshing = false
+        isTerminatingProcess = false
+    }
+
     func saveExpression(_ expression: String) throws {
         try settings.updateWatchedPortsExpression(expression, parser: parser)
         portExpression = expression
-        onRefresh()
+        onSettingsRefresh()
     }
 
     func applyPreset(_ preset: PortPreset) throws {
@@ -333,13 +358,13 @@ final class PortMonitorViewModel: ObservableObject {
         }
         try settings.saveCustomServiceEndpoint(name: name, port: port)
         customServiceEndpoints = settings.customServiceEndpoints
-        onRefresh()
+        onSettingsRefresh()
     }
 
     func deleteCustomServiceEndpoint(_ endpoint: DatabaseEndpoint) {
         settings.deleteCustomServiceEndpoint(id: endpoint.id)
         customServiceEndpoints = settings.customServiceEndpoints
-        onRefresh()
+        onSettingsRefresh()
     }
 
     func saveInterval(_ interval: RefreshInterval) {

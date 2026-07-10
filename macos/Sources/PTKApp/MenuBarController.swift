@@ -2,8 +2,14 @@ import AppKit
 import SwiftUI
 import PTKCore
 
-typealias ServiceStatusLoader = (@escaping @MainActor ([ServiceStatus]) -> Void) -> Void
-typealias ServiceSnapshotLoader = (@escaping @MainActor (ServiceSnapshot) -> Void) -> Void
+typealias PortScanWorker = @Sendable ([UInt16]) throws -> [PortStatus]
+typealias ServiceSnapshotWorker = @Sendable ([DatabaseEndpoint]) throws -> ServiceSnapshot
+typealias KillWorker = @Sendable (KillTarget) throws -> Void
+
+enum KillRequestResult: Sendable {
+    case settled(errorMessage: String?)
+    case invalidated
+}
 
 struct ServiceStatusCompositionPolicy: Equatable, Sendable {
     let builtInDatabasePorts: Set<UInt16>
@@ -21,48 +27,14 @@ struct ServiceStatusCompositionPolicy: Equatable, Sendable {
     }
 }
 
-private final class DefaultServiceStatusLoader {
-    private let serviceMonitor: ServiceMonitor
-    private let customEndpoints: () -> [DatabaseEndpoint]
-    private let compositionPolicy: ServiceStatusCompositionPolicy
-
-    init(
-        serviceMonitor: ServiceMonitor,
-        customEndpoints: @escaping () -> [DatabaseEndpoint] = { [] },
-        compositionPolicy: ServiceStatusCompositionPolicy = ServiceStatusCompositionPolicy()
-    ) {
-        self.serviceMonitor = serviceMonitor
-        self.customEndpoints = customEndpoints
-        self.compositionPolicy = compositionPolicy
-    }
-
-    func load(completion: @escaping @MainActor (ServiceSnapshot) -> Void) {
-        let serviceMonitor = serviceMonitor
-        let compositionPolicy = compositionPolicy
-        let customEndpoints = compositionPolicy.customEndpointsExcludingBuiltInPorts(customEndpoints())
-        DispatchQueue.global(qos: .utility).async {
-            let defaultSnapshot = serviceMonitor.scanWithDetails()
-            let customStatuses = customEndpoints.isEmpty
-                ? []
-                : ServiceMonitor(databaseEndpoints: customEndpoints).databaseStatuses(group: .custom)
-            let statuses = compositionPolicy.compose(defaultStatuses: defaultSnapshot.statuses, customStatuses: customStatuses)
-            Task { @MainActor in
-                completion(ServiceSnapshot(
-                    statuses: statuses,
-                    dockerContainerRows: defaultSnapshot.dockerContainerRows
-                ))
-            }
-        }
-    }
-}
 
 @MainActor
 final class MenuBarController: NSObject {
     private let settings: AppSettings
     private let parser: PortRangeParser
-    private let scanner: PortScanner
-    private let killService: KillService
-    private let serviceSnapshotLoader: ServiceSnapshotLoader
+    private let portScanWorker: PortScanWorker
+    private let serviceSnapshotWorker: ServiceSnapshotWorker
+    private let killWorker: KillWorker
     private var refreshScheduler: RefreshScheduler?
     private var statusItem: NSStatusItem?
     private var refreshTimer: Timer?
@@ -74,7 +46,15 @@ final class MenuBarController: NSObject {
     private var dockerContainerRows: [DockerContainerPortRow] = []
     private var previousStatusesForChanges: [PortStatus]?
     private var recentPortChanges: [PortChange] = []
-    private var errorMessage: String?
+    private var portErrorMessage: String?
+    private var serviceErrorMessage: String?
+    private var activeRefresh: ActiveRefresh?
+    private var portRefreshTask: Task<Void, Never>?
+    private var serviceRefreshTask: Task<Void, Never>?
+    private var killTask: Task<String?, Never>?
+    private var activeKillID: UUID?
+    private var isStopped = false
+    private(set) var lastRefreshTriggerForTesting: RefreshTrigger?
     static let quietRefreshCadence: TimeInterval = 30
 
     private enum RefreshCadence {
@@ -84,37 +64,59 @@ final class MenuBarController: NSObject {
 
     private var refreshCadence: RefreshCadence = .quiet
 
+    private enum RefreshBranch: Hashable {
+        case port
+        case service
+    }
+
+    private struct ActiveRefresh {
+        let id: UUID
+        var pendingBranches: Set<RefreshBranch>
+        let completion: @MainActor () -> Void
+    }
+
     init(
         settings: AppSettings = AppSettings(),
         parser: PortRangeParser = PortRangeParser(),
         scanner: PortScanner = PortScanner(),
         serviceMonitor: ServiceMonitor = ServiceMonitor(),
         killService: KillService = KillService(),
-        serviceStatusLoader: ServiceStatusLoader? = nil,
-        serviceSnapshotLoader: ServiceSnapshotLoader? = nil
+        portScanWorker: PortScanWorker? = nil,
+        serviceSnapshotWorker: ServiceSnapshotWorker? = nil,
+        killWorker: KillWorker? = nil
     ) {
         self.settings = settings
         self.parser = parser
-        self.scanner = scanner
-        self.killService = killService
-        let defaultServiceStatusLoader = DefaultServiceStatusLoader(
-            serviceMonitor: serviceMonitor,
-            customEndpoints: { settings.customServiceEndpoints }
-        )
-        if let serviceSnapshotLoader {
-            self.serviceSnapshotLoader = serviceSnapshotLoader
-        } else if let serviceStatusLoader {
-            self.serviceSnapshotLoader = { completion in
-                serviceStatusLoader { statuses in
-                    completion(ServiceSnapshot(statuses: statuses))
-                }
-            }
-        } else {
-            self.serviceSnapshotLoader = defaultServiceStatusLoader.load(completion:)
+        self.portScanWorker = portScanWorker ?? { ports in
+            scanner.scan(ports: ports)
         }
+        self.killWorker = killWorker ?? { target in
+            try killService.terminateAfterRevalidation(target: target)
+        }
+
+        let compositionPolicy = ServiceStatusCompositionPolicy()
+        self.serviceSnapshotWorker = serviceSnapshotWorker ?? { customEndpoints in
+            let defaultSnapshot = serviceMonitor.scanWithDetails()
+            let filteredEndpoints = compositionPolicy.customEndpointsExcludingBuiltInPorts(customEndpoints)
+            let customStatuses = filteredEndpoints.isEmpty
+                ? []
+                : ServiceMonitor(databaseEndpoints: filteredEndpoints).databaseStatuses(group: .custom)
+            return ServiceSnapshot(
+                statuses: compositionPolicy.compose(
+                    defaultStatuses: defaultSnapshot.statuses,
+                    customStatuses: customStatuses
+                ),
+                dockerContainerRows: defaultSnapshot.dockerContainerRows
+            )
+        }
+
         super.init()
-        self.refreshScheduler = RefreshScheduler(interval: settings.refreshInterval) { [weak self] in
-            self?.performRefresh()
+        self.refreshScheduler = RefreshScheduler(interval: settings.refreshInterval) { [weak self] trigger, completion in
+            guard let self else {
+                completion()
+                return
+            }
+            self.performRefresh(trigger: trigger, completion: completion)
         }
     }
 
@@ -136,6 +138,8 @@ final class MenuBarController: NSObject {
     }
 
     func start(showPanelOnLaunch: Bool = false) {
+        guard !isStopped else { return }
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
         item.menu = nil
@@ -144,7 +148,7 @@ final class MenuBarController: NSObject {
         configureStatusButton()
 
         setupPanel()
-        refreshScheduler?.triggerManualRefresh()
+        refreshScheduler?.triggerStartupRefresh()
         scheduleRefreshTimer()
 
         if showPanelOnLaunch {
@@ -153,6 +157,20 @@ final class MenuBarController: NSObject {
     }
 
     func stop() {
+        guard !isStopped else { return }
+        isStopped = true
+
+        portRefreshTask?.cancel()
+        serviceRefreshTask?.cancel()
+        killTask?.cancel()
+        portRefreshTask = nil
+        serviceRefreshTask = nil
+        killTask = nil
+        activeRefresh = nil
+        activeKillID = nil
+        refreshScheduler?.stop()
+        viewModel.cancelActiveWork()
+
         refreshTimer?.invalidate()
         refreshTimer = nil
         (panel as? PTKPanel)?.onOrderOut = nil
@@ -215,14 +233,21 @@ final class MenuBarController: NSObject {
     private func makeViewModel() -> PortMonitorViewModel {
         PortMonitorViewModel(
             settings: settings,
-            killService: killService,
             parser: parser,
             onRefresh: { [weak self] in
                 self?.refreshScheduler?.triggerManualRefresh()
             },
+            onSettingsRefresh: { [weak self] in
+                self?.refreshScheduler?.triggerSettingsRefresh()
+            },
+            onKill: { [weak self] target in
+                guard let self else { return .invalidated }
+                return await self.executeKill(target)
+            },
             onIntervalChange: { [weak self] interval in
                 self?.refreshScheduler?.changeInterval(to: interval)
                 self?.applyCurrentPanelCadence()
+                self?.refreshScheduler?.triggerSettingsRefresh()
             },
             onOpenLocalhost: { url in
                 NSWorkspace.shared.open(url)
@@ -366,30 +391,154 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func timerFired(_ timer: Timer) {
-        refreshScheduler?.triggerManualRefresh()
+        refreshScheduler?.triggerTimerRefresh()
+    }
+
+    func fireTimerForTesting() {
+        refreshScheduler?.triggerTimerRefresh()
     }
 
     func performRefresh() {
-        loadServiceStatuses()
-        do {
-            let ports = try parser.parse(settings.watchedPortsExpression)
-            let scannedStatuses = scanner.scan(ports: ports)
-            trackPortChanges(scannedStatuses)
-            statuses = scannedStatuses
-            errorMessage = statuses.compactMap(\.message).first
-        } catch {
-            errorMessage = "포트 설정 오류: \(error)"
-        }
-        updateViewModel()
+        refreshScheduler?.triggerManualRefresh()
     }
 
-    private func loadServiceStatuses() {
-        serviceSnapshotLoader { [weak self] snapshot in
-            guard let self else { return }
-            self.serviceStatuses = snapshot.statuses
-            self.dockerContainerRows = snapshot.dockerContainerRows
-            self.updateViewModel()
+    private func performRefresh(
+        trigger: RefreshTrigger,
+        completion: @escaping @MainActor () -> Void
+    ) {
+        guard !isStopped else {
+            completion()
+            return
         }
+
+        let runID = UUID()
+        activeRefresh = ActiveRefresh(
+            id: runID,
+            pendingBranches: [.port, .service],
+            completion: completion
+        )
+        lastRefreshTriggerForTesting = trigger
+        viewModel.isRefreshing = true
+
+        let customEndpoints = settings.customServiceEndpoints
+        let serviceSnapshotWorker = serviceSnapshotWorker
+        serviceRefreshTask = Task.detached(priority: .utility) { [weak self, customEndpoints, serviceSnapshotWorker] in
+            guard self != nil, !Task.isCancelled else { return }
+            do {
+                let snapshot = try serviceSnapshotWorker(customEndpoints)
+                guard !Task.isCancelled else { return }
+                await self?.settleServiceBranch(runID: runID, snapshot: snapshot)
+            } catch {
+                guard !Task.isCancelled else { return }
+                await self?.settleServiceBranch(runID: runID, errorMessage: "\(error)")
+            }
+        }
+
+        let expression = settings.watchedPortsExpression
+        let ports: [UInt16]
+        do {
+            ports = try parser.parse(expression)
+        } catch {
+            settlePortBranch(runID: runID, errorMessage: "포트 설정 오류: \(error)")
+            return
+        }
+
+        let portScanWorker = portScanWorker
+        portRefreshTask = Task.detached(priority: .utility) { [weak self, ports, portScanWorker] in
+            guard self != nil, !Task.isCancelled else { return }
+            do {
+                let statuses = try portScanWorker(ports)
+                guard !Task.isCancelled else { return }
+                await self?.settlePortBranch(runID: runID, statuses: statuses)
+            } catch {
+                guard !Task.isCancelled else { return }
+                await self?.settlePortBranch(runID: runID, errorMessage: "\(error)")
+            }
+        }
+    }
+
+    private func settlePortBranch(runID: UUID, statuses: [PortStatus]) {
+        guard isActive(runID: runID, branch: .port) else { return }
+        trackPortChanges(statuses)
+        self.statuses = statuses
+        portErrorMessage = statuses.compactMap(\.message).first
+        updateViewModel()
+        settle(runID: runID, branch: .port)
+    }
+
+    private func settlePortBranch(runID: UUID, errorMessage: String) {
+        guard isActive(runID: runID, branch: .port) else { return }
+        portErrorMessage = errorMessage
+        updateViewModel()
+        settle(runID: runID, branch: .port)
+    }
+
+    private func settleServiceBranch(runID: UUID, snapshot: ServiceSnapshot) {
+        guard isActive(runID: runID, branch: .service) else { return }
+        serviceStatuses = snapshot.statuses
+        dockerContainerRows = snapshot.dockerContainerRows
+        serviceErrorMessage = nil
+        updateViewModel()
+        settle(runID: runID, branch: .service)
+    }
+
+    private func settleServiceBranch(runID: UUID, errorMessage: String) {
+        guard isActive(runID: runID, branch: .service) else { return }
+        serviceErrorMessage = errorMessage
+        updateViewModel()
+        settle(runID: runID, branch: .service)
+    }
+
+    private func isActive(runID: UUID, branch: RefreshBranch) -> Bool {
+        guard !isStopped, let activeRefresh else { return false }
+        return activeRefresh.id == runID && activeRefresh.pendingBranches.contains(branch)
+    }
+
+    private func settle(runID: UUID, branch: RefreshBranch) {
+        guard var refresh = activeRefresh, refresh.id == runID else { return }
+        guard refresh.pendingBranches.remove(branch) != nil else { return }
+
+        switch branch {
+        case .port:
+            portRefreshTask = nil
+        case .service:
+            serviceRefreshTask = nil
+        }
+
+        guard refresh.pendingBranches.isEmpty else {
+            activeRefresh = refresh
+            return
+        }
+
+        activeRefresh = nil
+        viewModel.isRefreshing = false
+        refresh.completion()
+    }
+
+    private func executeKill(_ target: KillTarget) async -> KillRequestResult {
+        guard !isStopped, activeKillID == nil else { return .invalidated }
+
+        let killID = UUID()
+        activeKillID = killID
+        let killWorker = killWorker
+        let task = Task<String?, Never>.detached(priority: .userInitiated) { [weak self, killWorker, target] in
+            guard self != nil, !Task.isCancelled else { return nil }
+            do {
+                try killWorker(target)
+                return nil
+            } catch {
+                return "\(error)"
+            }
+        }
+        killTask = task
+
+        let errorMessage = await task.value
+        guard !isStopped, activeKillID == killID else { return .invalidated }
+
+        activeKillID = nil
+        killTask = nil
+        refreshScheduler?.triggerKillRefresh()
+        return .settled(errorMessage: errorMessage)
     }
 
     private func trackPortChanges(_ scannedStatuses: [PortStatus]) {
@@ -412,7 +561,10 @@ final class MenuBarController: NSObject {
         viewModel.serviceStatuses = serviceStatuses
         viewModel.dockerContainerRows = dockerContainerRows
         viewModel.recentPortChanges = recentPortChanges
-        viewModel.errorMessage = errorMessage
+        viewModel.errorMessage = [portErrorMessage, serviceErrorMessage]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+            .nilIfEmpty
         configureStatusButton()
     }
 }
@@ -434,4 +586,10 @@ struct MenuBarButtonState: Equatable {
     let hasImage: Bool
     let toolTip: String?
     let accessibilityLabel: String?
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
 }

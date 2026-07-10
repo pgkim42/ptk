@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-public protocol SocketConnecting {
+public protocol SocketConnecting: Sendable {
     func isListening(host: String, port: UInt16, timeout: TimeInterval) -> Bool
 }
 
@@ -31,7 +31,7 @@ public struct TCPPortConnector: SocketConnecting {
     }
 }
 
-public struct PortScanner {
+public struct PortScanner: Sendable {
     private let connector: SocketConnecting
     private let lookup: ProcessLookup
     private let timeout: TimeInterval

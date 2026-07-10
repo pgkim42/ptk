@@ -30,7 +30,7 @@ public enum ProcessLookupError: Error, Equatable, CustomStringConvertible {
     }
 }
 
-public struct ProcessLookup {
+public struct ProcessLookup: Sendable {
     private let runner: ProcessRunning
     private let parser: LsofParser
 

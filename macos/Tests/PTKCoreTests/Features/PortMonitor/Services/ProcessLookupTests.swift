@@ -145,19 +145,42 @@ private struct TimeoutProcessCall: Equatable {
     let timeout: TimeInterval
 }
 
-private final class TimeoutRecordingProcessRunner: ProcessRunning {
-    var results: [String: ProcessRunResult] = [:]
-    var error: ProcessRunnerError?
-    var calls: [TimeoutProcessCall] = []
+private final class TimeoutRecordingProcessRunner: ProcessRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedResults: [String: ProcessRunResult] = [:]
+    private var storedError: ProcessRunnerError?
+    private var storedCalls: [TimeoutProcessCall] = []
 
-    func run(_ executable: String, arguments: [String], timeout: TimeInterval) throws -> ProcessRunResult {
-        calls.append(TimeoutProcessCall(executable: executable, arguments: arguments, timeout: timeout))
-        return try result(executable, arguments: arguments)
+    var results: [String: ProcessRunResult] {
+        get { lock.withLock { storedResults } }
+        set { lock.withLock { storedResults = newValue } }
     }
 
-    private func result(_ executable: String, arguments: [String]) throws -> ProcessRunResult {
-        if let error { throw error }
-        let key = ([executable] + arguments).joined(separator: " ")
-        return results[key] ?? ProcessRunResult(exitCode: 1, stdout: "", stderr: "missing fake result")
+    var error: ProcessRunnerError? {
+        get { lock.withLock { storedError } }
+        set { lock.withLock { storedError = newValue } }
+    }
+
+    var calls: [TimeoutProcessCall] {
+        lock.withLock { storedCalls }
+    }
+
+    func run(_ executable: String, arguments: [String], timeout: TimeInterval) throws -> ProcessRunResult {
+        try lock.withLock {
+            storedCalls.append(
+                TimeoutProcessCall(
+                    executable: executable,
+                    arguments: arguments,
+                    timeout: timeout
+                )
+            )
+            if let storedError { throw storedError }
+            let key = ([executable] + arguments).joined(separator: " ")
+            return storedResults[key] ?? ProcessRunResult(
+                exitCode: 1,
+                stdout: "",
+                stderr: "missing fake result"
+            )
+        }
     }
 }

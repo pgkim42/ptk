@@ -14,7 +14,7 @@ public struct ProcessRunResult: Equatable, Sendable {
     public var succeeded: Bool { exitCode == 0 }
 }
 
-public protocol ProcessRunning {
+public protocol ProcessRunning: Sendable {
     func run(_ executable: String, arguments: [String], timeout: TimeInterval) throws -> ProcessRunResult
 }
 
