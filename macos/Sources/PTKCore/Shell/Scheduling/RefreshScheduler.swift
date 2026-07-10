@@ -31,11 +31,17 @@ public final class RefreshScheduler {
 
     public private(set) var interval: RefreshInterval
     public private(set) var scheduleGeneration: Int = 0
+    /// `true` while any accepted refresh receipt remains unsettled.
+    ///
+    /// Timer admission is keyed to the newest receipt, so a timer refresh may
+    /// be accepted while this aggregate state remains `true`.
     public var isInFlight: Bool {
-        activeToken != nil
+        !activeTokens.isEmpty
     }
 
-    private var activeToken: RequestToken?
+    private var activeTokens: [ObjectIdentifier: RequestToken] = [:]
+    private var newestToken: RequestToken?
+    private var didTriggerStartup = false
     private var isStopped = false
     private let refresh: (RefreshTrigger, @escaping @MainActor () -> Void) -> Void
 
@@ -80,23 +86,35 @@ public final class RefreshScheduler {
 
     public func stop() {
         isStopped = true
-        activeToken = nil
+        newestToken = nil
+        activeTokens.removeAll()
     }
 
     private func trigger(_ trigger: RefreshTrigger) -> RefreshTriggerResult {
         guard !isStopped else { return .stopped }
-        guard activeToken == nil else { return .skippedInFlight }
+        if trigger == .startup {
+            guard !didTriggerStartup, activeTokens.isEmpty else { return .skippedInFlight }
+            didTriggerStartup = true
+        } else if trigger == .timer {
+            guard newestToken == nil else { return .skippedInFlight }
+        }
 
         let token = RequestToken()
-        activeToken = token
-        refresh(trigger) { [weak self] in
+        let tokenID = ObjectIdentifier(token)
+        activeTokens[tokenID] = token
+        newestToken = token
+        refresh(trigger) { [weak self, token] in
             self?.finishRefresh(token)
         }
         return .started
     }
 
     private func finishRefresh(_ token: RequestToken) {
-        guard activeToken === token else { return }
-        activeToken = nil
+        let tokenID = ObjectIdentifier(token)
+        guard activeTokens[tokenID] === token else { return }
+        activeTokens.removeValue(forKey: tokenID)
+        if newestToken === token {
+            newestToken = nil
+        }
     }
 }

@@ -48,9 +48,10 @@ final class MenuBarController: NSObject {
     private var recentPortChanges: [PortChange] = []
     private var portErrorMessage: String?
     private var serviceErrorMessage: String?
-    private var activeRefresh: ActiveRefresh?
-    private var portRefreshTask: Task<Void, Never>?
-    private var serviceRefreshTask: Task<Void, Never>?
+    private var nextGeneration = 0
+    private var newestRequestedGeneration: Int?
+    private var activeRefreshes: [Int: ActiveRefresh] = [:]
+    private var pendingRefresh: RefreshRequest?
     private var killTask: Task<String?, Never>?
     private var activeKillID: UUID?
     private var isStopped = false
@@ -69,10 +70,54 @@ final class MenuBarController: NSObject {
         case service
     }
 
-    private struct ActiveRefresh {
-        let id: UUID
-        var pendingBranches: Set<RefreshBranch>
+    private struct RefreshRequest {
+        let generation: Int
+        let trigger: RefreshTrigger
         let completion: @MainActor () -> Void
+    }
+
+    private struct ActiveRefresh {
+        let request: RefreshRequest
+        var pendingBranches: Set<RefreshBranch>
+        var portTask: Task<Void, Never>?
+        var serviceTask: Task<Void, Never>?
+    }
+
+    private struct KillOperation {
+        let id: UUID
+        let task: Task<String?, Never>
+    }
+
+    var nextGenerationForTesting: Int {
+        nextGeneration
+    }
+
+    var newestRequestedGenerationForTesting: Int? {
+        newestRequestedGeneration
+    }
+
+    var activeGenerationsForTesting: [Int] {
+        activeRefreshes.keys.sorted()
+    }
+
+    var pendingGenerationForTesting: Int? {
+        pendingRefresh?.generation
+    }
+
+    func settlePortForTesting(generation: Int, statuses: [PortStatus]) {
+        settlePortBranch(generation: generation, statuses: statuses)
+    }
+
+    func settlePortErrorForTesting(generation: Int, errorMessage: String) {
+        settlePortBranch(generation: generation, errorMessage: errorMessage)
+    }
+
+    func settleServiceForTesting(generation: Int, snapshot: ServiceSnapshot) {
+        settleServiceBranch(generation: generation, snapshot: snapshot)
+    }
+
+    func settleServiceErrorForTesting(generation: Int, errorMessage: String) {
+        settleServiceBranch(generation: generation, errorMessage: errorMessage)
     }
 
     init(
@@ -159,17 +204,21 @@ final class MenuBarController: NSObject {
     func stop() {
         guard !isStopped else { return }
         isStopped = true
-
-        portRefreshTask?.cancel()
-        serviceRefreshTask?.cancel()
-        killTask?.cancel()
-        portRefreshTask = nil
-        serviceRefreshTask = nil
-        killTask = nil
-        activeRefresh = nil
-        activeKillID = nil
         refreshScheduler?.stop()
+
+        let refreshes = Array(activeRefreshes.values)
+        newestRequestedGeneration = nil
+        pendingRefresh = nil
+        activeRefreshes.removeAll()
+        for refresh in refreshes {
+            refresh.portTask?.cancel()
+            refresh.serviceTask?.cancel()
+        }
+        killTask?.cancel()
+        killTask = nil
+        activeKillID = nil
         viewModel.cancelActiveWork()
+        viewModel.isRefreshing = false
 
         refreshTimer?.invalidate()
         refreshTimer = nil
@@ -241,8 +290,13 @@ final class MenuBarController: NSObject {
                 self?.refreshScheduler?.triggerSettingsRefresh()
             },
             onKill: { [weak self] target in
+                guard let operation = self?.beginKill(target) else { return .invalidated }
+                let errorMessage = await operation.task.value
                 guard let self else { return .invalidated }
-                return await self.executeKill(target)
+                return self.finishKill(operationID: operation.id, errorMessage: errorMessage)
+            },
+            onKillSettled: { [weak self] in
+                self?.refreshScheduler?.triggerKillRefresh()
             },
             onIntervalChange: { [weak self] interval in
                 self?.refreshScheduler?.changeInterval(to: interval)
@@ -411,118 +465,190 @@ final class MenuBarController: NSObject {
             return
         }
 
-        let runID = UUID()
-        activeRefresh = ActiveRefresh(
-            id: runID,
-            pendingBranches: [.port, .service],
+        nextGeneration += 1
+        let request = RefreshRequest(
+            generation: nextGeneration,
+            trigger: trigger,
             completion: completion
         )
+        newestRequestedGeneration = request.generation
         lastRefreshTriggerForTesting = trigger
-        viewModel.isRefreshing = true
 
+        if activeRefreshes.count < 2 {
+            startRefresh(request)
+        } else {
+            let replacedRequest = pendingRefresh
+            pendingRefresh = request
+            updateRefreshProgress()
+            replacedRequest?.completion()
+        }
+    }
+
+    private func startRefresh(_ request: RefreshRequest) {
+        guard !isStopped, activeRefreshes.count < 2 else { return }
+
+        activeRefreshes[request.generation] = ActiveRefresh(
+            request: request,
+            pendingBranches: [.port, .service],
+            portTask: nil,
+            serviceTask: nil
+        )
+        updateRefreshProgress()
+
+        let generation = request.generation
         let customEndpoints = settings.customServiceEndpoints
         let serviceSnapshotWorker = serviceSnapshotWorker
-        serviceRefreshTask = Task.detached(priority: .utility) { [weak self, customEndpoints, serviceSnapshotWorker] in
+        let serviceTask = Task.detached(priority: .utility) { [weak self, customEndpoints, serviceSnapshotWorker] in
             guard self != nil, !Task.isCancelled else { return }
             do {
                 let snapshot = try serviceSnapshotWorker(customEndpoints)
-                guard !Task.isCancelled else { return }
-                await self?.settleServiceBranch(runID: runID, snapshot: snapshot)
+                await self?.settleServiceBranch(generation: generation, snapshot: snapshot)
             } catch {
-                guard !Task.isCancelled else { return }
-                await self?.settleServiceBranch(runID: runID, errorMessage: "\(error)")
+                await self?.settleServiceBranch(generation: generation, errorMessage: "\(error)")
             }
         }
+        setTask(serviceTask, branch: .service, generation: generation)
 
         let expression = settings.watchedPortsExpression
         let ports: [UInt16]
         do {
             ports = try parser.parse(expression)
         } catch {
-            settlePortBranch(runID: runID, errorMessage: "포트 설정 오류: \(error)")
+            settlePortBranch(
+                generation: generation,
+                errorMessage: "포트 설정 오류: \(error)"
+            )
             return
         }
 
         let portScanWorker = portScanWorker
-        portRefreshTask = Task.detached(priority: .utility) { [weak self, ports, portScanWorker] in
+        let portTask = Task.detached(priority: .utility) { [weak self, ports, portScanWorker] in
             guard self != nil, !Task.isCancelled else { return }
             do {
                 let statuses = try portScanWorker(ports)
-                guard !Task.isCancelled else { return }
-                await self?.settlePortBranch(runID: runID, statuses: statuses)
+                await self?.settlePortBranch(generation: generation, statuses: statuses)
             } catch {
-                guard !Task.isCancelled else { return }
-                await self?.settlePortBranch(runID: runID, errorMessage: "\(error)")
+                await self?.settlePortBranch(generation: generation, errorMessage: "\(error)")
             }
         }
+        setTask(portTask, branch: .port, generation: generation)
     }
 
-    private func settlePortBranch(runID: UUID, statuses: [PortStatus]) {
-        guard isActive(runID: runID, branch: .port) else { return }
-        trackPortChanges(statuses)
-        self.statuses = statuses
-        portErrorMessage = statuses.compactMap(\.message).first
-        updateViewModel()
-        settle(runID: runID, branch: .port)
+    private func setTask(
+        _ task: Task<Void, Never>,
+        branch: RefreshBranch,
+        generation: Int
+    ) {
+        guard var refresh = activeRefreshes[generation] else {
+            task.cancel()
+            return
+        }
+        switch branch {
+        case .port:
+            refresh.portTask = task
+        case .service:
+            refresh.serviceTask = task
+        }
+        activeRefreshes[generation] = refresh
     }
 
-    private func settlePortBranch(runID: UUID, errorMessage: String) {
-        guard isActive(runID: runID, branch: .port) else { return }
-        portErrorMessage = errorMessage
-        updateViewModel()
-        settle(runID: runID, branch: .port)
+    private func settlePortBranch(generation: Int, statuses: [PortStatus]) {
+        guard canSettle(generation: generation, branch: .port) else { return }
+        if canPublish(generation: generation) {
+            trackPortChanges(statuses)
+            self.statuses = statuses
+            portErrorMessage = statuses.compactMap(\.message).first
+            updateViewModel()
+        }
+        settle(generation: generation, branch: .port)
     }
 
-    private func settleServiceBranch(runID: UUID, snapshot: ServiceSnapshot) {
-        guard isActive(runID: runID, branch: .service) else { return }
-        serviceStatuses = snapshot.statuses
-        dockerContainerRows = snapshot.dockerContainerRows
-        serviceErrorMessage = nil
-        updateViewModel()
-        settle(runID: runID, branch: .service)
+    private func settlePortBranch(generation: Int, errorMessage: String) {
+        guard canSettle(generation: generation, branch: .port) else { return }
+        if canPublish(generation: generation) {
+            portErrorMessage = errorMessage
+            updateViewModel()
+        }
+        settle(generation: generation, branch: .port)
     }
 
-    private func settleServiceBranch(runID: UUID, errorMessage: String) {
-        guard isActive(runID: runID, branch: .service) else { return }
-        serviceErrorMessage = errorMessage
-        updateViewModel()
-        settle(runID: runID, branch: .service)
+    private func settleServiceBranch(generation: Int, snapshot: ServiceSnapshot) {
+        guard canSettle(generation: generation, branch: .service) else { return }
+        if canPublish(generation: generation) {
+            serviceStatuses = snapshot.statuses
+            dockerContainerRows = snapshot.dockerContainerRows
+            serviceErrorMessage = nil
+            updateViewModel()
+        }
+        settle(generation: generation, branch: .service)
     }
 
-    private func isActive(runID: UUID, branch: RefreshBranch) -> Bool {
-        guard !isStopped, let activeRefresh else { return false }
-        return activeRefresh.id == runID && activeRefresh.pendingBranches.contains(branch)
+    private func settleServiceBranch(generation: Int, errorMessage: String) {
+        guard canSettle(generation: generation, branch: .service) else { return }
+        if canPublish(generation: generation) {
+            serviceErrorMessage = errorMessage
+            updateViewModel()
+        }
+        settle(generation: generation, branch: .service)
     }
 
-    private func settle(runID: UUID, branch: RefreshBranch) {
-        guard var refresh = activeRefresh, refresh.id == runID else { return }
+    private func canSettle(generation: Int, branch: RefreshBranch) -> Bool {
+        guard !isStopped, let refresh = activeRefreshes[generation] else { return false }
+        return refresh.pendingBranches.contains(branch)
+    }
+
+    private func canPublish(generation: Int) -> Bool {
+        !isStopped && newestRequestedGeneration == generation
+    }
+
+    private func settle(generation: Int, branch: RefreshBranch) {
+        guard var refresh = activeRefreshes[generation] else { return }
         guard refresh.pendingBranches.remove(branch) != nil else { return }
 
         switch branch {
         case .port:
-            portRefreshTask = nil
+            refresh.portTask = nil
         case .service:
-            serviceRefreshTask = nil
+            refresh.serviceTask = nil
         }
 
         guard refresh.pendingBranches.isEmpty else {
-            activeRefresh = refresh
+            activeRefreshes[generation] = refresh
+            updateRefreshProgress()
             return
         }
 
-        activeRefresh = nil
-        viewModel.isRefreshing = false
-        refresh.completion()
+        activeRefreshes.removeValue(forKey: generation)
+        refresh.request.completion()
+
+        if !isStopped, activeRefreshes.count < 2, let request = pendingRefresh {
+            pendingRefresh = nil
+            startRefresh(request)
+        }
+        updateRefreshProgress()
     }
 
-    private func executeKill(_ target: KillTarget) async -> KillRequestResult {
-        guard !isStopped, activeKillID == nil else { return .invalidated }
+    private func updateRefreshProgress() {
+        guard !isStopped, let newestRequestedGeneration else {
+            viewModel.isRefreshing = false
+            return
+        }
+        if pendingRefresh?.generation == newestRequestedGeneration {
+            viewModel.isRefreshing = true
+            return
+        }
+        viewModel.isRefreshing =
+            activeRefreshes[newestRequestedGeneration]?.pendingBranches.isEmpty == false
+    }
+
+    private func beginKill(_ target: KillTarget) -> KillOperation? {
+        guard !isStopped, activeKillID == nil else { return nil }
 
         let killID = UUID()
         activeKillID = killID
         let killWorker = killWorker
-        let task = Task<String?, Never>.detached(priority: .userInitiated) { [weak self, killWorker, target] in
-            guard self != nil, !Task.isCancelled else { return nil }
+        let task = Task<String?, Never>.detached(priority: .userInitiated) { [killWorker, target] in
+            guard !Task.isCancelled else { return nil }
             do {
                 try killWorker(target)
                 return nil
@@ -531,13 +657,14 @@ final class MenuBarController: NSObject {
             }
         }
         killTask = task
+        return KillOperation(id: killID, task: task)
+    }
 
-        let errorMessage = await task.value
-        guard !isStopped, activeKillID == killID else { return .invalidated }
+    private func finishKill(operationID: UUID, errorMessage: String?) -> KillRequestResult {
+        guard !isStopped, activeKillID == operationID else { return .invalidated }
 
         activeKillID = nil
         killTask = nil
-        refreshScheduler?.triggerKillRefresh()
         return .settled(errorMessage: errorMessage)
     }
 

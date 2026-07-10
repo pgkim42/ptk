@@ -39,6 +39,7 @@ import Testing
 
         #expect(scheduler.triggerStartupRefresh() == .started)
         #expect(!scheduler.isInFlight)
+        #expect(scheduler.triggerStartupRefresh() == .skippedInFlight)
         #expect(scheduler.triggerTimerRefresh() == .started)
         #expect(!scheduler.isInFlight)
         #expect(scheduler.triggerManualRefresh() == .started)
@@ -50,49 +51,85 @@ import Testing
         #expect(receivedTriggers == [.startup, .timer, .manual, .settings, .kill])
     }
 
-    @Test func delayedCompletionKeepsRequestInFlightAndBlocksOverlap() {
+    @Test func timerDuringOutstandingRefreshDoesNotReachController() {
+        var receivedTriggers: [RefreshTrigger] = []
         var completion: (@MainActor () -> Void)?
-        let scheduler = RefreshScheduler { _, finish in
+        let scheduler = RefreshScheduler { trigger, finish in
+            receivedTriggers.append(trigger)
             completion = finish
         }
 
         #expect(scheduler.triggerManualRefresh() == .started)
         #expect(scheduler.isInFlight)
         #expect(scheduler.triggerTimerRefresh() == .skippedInFlight)
-        #expect(scheduler.isInFlight)
+        #expect(scheduler.triggerStartupRefresh() == .skippedInFlight)
+        #expect(receivedTriggers == [.manual])
 
         completion?()
         #expect(!scheduler.isInFlight)
         #expect(scheduler.triggerTimerRefresh() == .started)
-        #expect(scheduler.isInFlight)
-        completion?()
-        #expect(!scheduler.isInFlight)
+        #expect(receivedTriggers == [.manual, .timer])
     }
 
-    @Test func duplicateCompletionCannotFinishLaterRequest() {
-        var callbackCount = 0
-        var firstCompletion: (@MainActor () -> Void)?
-        var secondCompletion: (@MainActor () -> Void)?
-        let scheduler = RefreshScheduler { _, completion in
-            callbackCount += 1
-            if callbackCount == 1 {
-                firstCompletion = completion
-            } else {
-                secondCompletion = completion
-            }
+    @Test func supersedingTriggersTrackIndependentCompletionReceipts() {
+        var completions: [@MainActor () -> Void] = []
+        var receivedTriggers: [RefreshTrigger] = []
+        let scheduler = RefreshScheduler { trigger, completion in
+            receivedTriggers.append(trigger)
+            completions.append(completion)
         }
 
         #expect(scheduler.triggerManualRefresh() == .started)
-        firstCompletion?()
-        #expect(!scheduler.isInFlight)
+        #expect(scheduler.triggerSettingsRefresh() == .started)
+        #expect(scheduler.triggerKillRefresh() == .started)
+        #expect(receivedTriggers == [.manual, .settings, .kill])
+        #expect(scheduler.isInFlight)
 
+        completions[1]()
+        #expect(scheduler.isInFlight)
+        completions[1]()
+        #expect(scheduler.isInFlight)
+
+        completions[0]()
+        #expect(scheduler.isInFlight)
+        completions[1]()
+        #expect(scheduler.isInFlight)
+
+        completions[2]()
+        #expect(!scheduler.isInFlight)
+    }
+
+    @Test func timerUsesNewestReceiptButStartupRequiresTrueIdleAndIsAcceptedOnlyOnce() {
+        var completions: [@MainActor () -> Void] = []
+        var receivedTriggers: [RefreshTrigger] = []
+        let scheduler = RefreshScheduler { trigger, completion in
+            receivedTriggers.append(trigger)
+            completions.append(completion)
+        }
+
+        #expect(scheduler.triggerManualRefresh() == .started)
         #expect(scheduler.triggerSettingsRefresh() == .started)
         #expect(scheduler.isInFlight)
-        firstCompletion?()
+        #expect(scheduler.triggerTimerRefresh() == .skippedInFlight)
+
+        completions[1]()
+        #expect(scheduler.isInFlight)
+        #expect(scheduler.triggerStartupRefresh() == .skippedInFlight)
+        #expect(scheduler.triggerTimerRefresh() == .started)
+        #expect(receivedTriggers == [.manual, .settings, .timer])
         #expect(scheduler.isInFlight)
 
-        secondCompletion?()
+        completions[1]()
+        completions[2]()
+        #expect(scheduler.isInFlight)
+        completions[0]()
         #expect(!scheduler.isInFlight)
+
+        #expect(scheduler.triggerStartupRefresh() == .started)
+        #expect(receivedTriggers == [.manual, .settings, .timer, .startup])
+        completions[3]()
+        #expect(!scheduler.isInFlight)
+        #expect(scheduler.triggerStartupRefresh() == .skippedInFlight)
     }
 
     @Test func stopInvalidatesActiveRequestAndLateCompletionDoesNothing() {

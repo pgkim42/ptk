@@ -120,6 +120,24 @@ struct FakeConfirmer: KillConfirming {
         #expect(terminator.terminatedPIDs.isEmpty)
     }
 
+    @Test(arguments: [Optional<String>.none, Optional<String>("")])
+    func unavailableFreshProcessNameBlocksTermination(processName: String?) {
+        let terminator = FakeTerminator()
+        let service = KillService(
+            resolver: FakeResolver(
+                info: PortProcessInfo(port: 3000, pid: 111, processName: processName)
+            ),
+            terminator: terminator
+        )
+
+        #expect(throws: KillError.processNameUnavailable) {
+            try service.terminateAfterRevalidation(
+                target: KillTarget(port: 3000, pid: 111, processName: "node")
+            )
+        }
+        #expect(terminator.terminatedPIDs == [])
+    }
+
     @Test func processNameMismatchBlocksTermination() {
         let terminator = FakeTerminator()
         let service = KillService(

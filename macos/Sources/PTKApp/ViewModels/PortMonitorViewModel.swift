@@ -201,6 +201,7 @@ final class PortMonitorViewModel: ObservableObject {
     private let onRefresh: () -> Void
     private let onSettingsRefresh: () -> Void
     private let onKill: @MainActor (KillTarget) async -> KillRequestResult
+    private let onKillSettled: () -> Void
     private let onIntervalChange: (RefreshInterval) -> Void
     private let onOpenLocalhost: (URL) -> Void
     private let onCopyText: (String) -> Void
@@ -212,6 +213,7 @@ final class PortMonitorViewModel: ObservableObject {
         onRefresh: @escaping () -> Void,
         onSettingsRefresh: @escaping () -> Void = {},
         onKill: @escaping @MainActor (KillTarget) async -> KillRequestResult = { _ in .invalidated },
+        onKillSettled: @escaping () -> Void = {},
         onIntervalChange: @escaping (RefreshInterval) -> Void = { _ in },
         onOpenLocalhost: @escaping (URL) -> Void = { _ in },
         onCopyText: @escaping (String) -> Void = { _ in }
@@ -226,6 +228,7 @@ final class PortMonitorViewModel: ObservableObject {
         self.onRefresh = onRefresh
         self.onSettingsRefresh = onSettingsRefresh
         self.onKill = onKill
+        self.onKillSettled = onKillSettled
         self.onIntervalChange = onIntervalChange
         self.onOpenLocalhost = onOpenLocalhost
         self.onCopyText = onCopyText
@@ -307,6 +310,7 @@ final class PortMonitorViewModel: ObservableObject {
             switch result {
             case .settled(let errorMessage):
                 self.killErrorMessage = errorMessage
+                self.onKillSettled()
             case .invalidated:
                 self.killErrorMessage = nil
             }
