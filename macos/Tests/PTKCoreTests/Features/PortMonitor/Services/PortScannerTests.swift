@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import PTKCore
 
@@ -41,6 +42,40 @@ node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
         #expect(status.message?.contains("process lookup failed") == true)
     }
 
+    @Test func processNameFailureKeepsOpenPortWithoutIdentityAndDisablesKillTarget() {
+        let runner = ProcessNameFailingRunner()
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 0,
+            stdout: """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
+            """
+        )
+        let scanner = PortScanner(
+            connector: FakeSocketConnector(openPorts: [3000]),
+            lookup: ProcessLookup(runner: runner)
+        )
+
+        let status = scanner.scan(ports: [3000])[0]
+        let row = MenuModel(statuses: [status]).rows[0]
+
+        #expect(status.isOpen)
+        #expect(status.pid == nil)
+        #expect(status.processName == nil)
+        #expect(
+            status.message
+                == "process lookup failed: process name lookup failed for PID 111: process timed out"
+        )
+        #expect(
+            row.killUnavailableCause
+                == .lookupFailed(
+                    message: "process lookup failed: process name lookup failed for PID 111: process timed out"
+                )
+        )
+        #expect(row.killTarget == nil)
+        #expect(!row.canRequestKill)
+    }
+
     @Test func ambiguousSamePortListenersDisableKillTarget() {
         let runner = FakeProcessRunner()
         runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
@@ -64,5 +99,25 @@ node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
         #expect(status.message?.contains("ambiguous") == true)
         #expect(row.killTarget == nil)
         #expect(!row.canRequestKill)
+    }
+}
+
+private final class ProcessNameFailingRunner: ProcessRunning {
+    var results: [String: ProcessRunResult] = [:]
+
+    func run(
+        _ executable: String,
+        arguments: [String],
+        timeout: TimeInterval
+    ) throws -> ProcessRunResult {
+        if executable == "ps" {
+            throw ProcessRunnerError.timedOut
+        }
+        let key = ([executable] + arguments).joined(separator: " ")
+        return results[key] ?? ProcessRunResult(
+            exitCode: 1,
+            stdout: "",
+            stderr: "missing fake result"
+        )
     }
 }

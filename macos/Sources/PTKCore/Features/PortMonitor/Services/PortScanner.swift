@@ -67,12 +67,20 @@ public struct PortScanner {
                         message: "ambiguous process lookup: port \(port) has PIDs \(pidList)"
                     )
                 }
-                return PortStatus(
-                    port: port,
-                    isOpen: true,
-                    pid: pid,
-                    processName: lookup.processName(pid: pid)
-                )
+                do {
+                    return PortStatus(
+                        port: port,
+                        isOpen: true,
+                        pid: pid,
+                        processName: try lookup.processName(pid: pid)
+                    )
+                } catch {
+                    return PortStatus(
+                        port: port,
+                        isOpen: true,
+                        message: "process lookup failed: \(error)"
+                    )
+                }
             case .failure(let error):
                 return PortStatus(port: port, isOpen: true, message: "process lookup failed: \(error)")
             }

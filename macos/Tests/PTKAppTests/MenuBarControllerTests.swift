@@ -961,7 +961,7 @@ import Testing
 private final class FakeProcessRunner: ProcessRunning {
     var results: [String: ProcessRunResult] = [:]
 
-    func run(_ executable: String, arguments: [String]) throws -> ProcessRunResult {
+    func run(_ executable: String, arguments: [String], timeout: TimeInterval) throws -> ProcessRunResult {
         let key = ([executable] + arguments).joined(separator: " ")
         return results[key] ?? ProcessRunResult(exitCode: 0, stdout: "")
     }

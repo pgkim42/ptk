@@ -64,11 +64,19 @@ public protocol ProcessTerminating {
 }
 
 public struct SystemProcessTerminator: ProcessTerminating {
-    public init() {}
+    private let signalSender: (pid_t, Int32) -> Int32
+
+    public init() {
+        signalSender = { Darwin.kill($0, $1) }
+    }
+
+    init(signalSender: @escaping (pid_t, Int32) -> Int32) {
+        self.signalSender = signalSender
+    }
 
     public func terminate(pid: Int) -> String? {
         guard pid > 0 else { return "invalid PID" }
-        if Darwin.kill(pid_t(pid), SIGTERM) == 0 {
+        if signalSender(pid_t(pid), SIGTERM) == 0 {
             return nil
         }
         return String(cString: strerror(errno))

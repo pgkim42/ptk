@@ -224,7 +224,10 @@ public protocol ServiceCommandRunning: Sendable {
 }
 
 public enum ServiceCommandError: Error, Equatable, Sendable {
+    case launchFailed(String)
     case timedOut
+    case outputLimitExceeded(streams: Set<OwnedHelperStream>)
+    case pipeDrainTimedOut
 }
 
 public struct DockerPublishedPortParser: Sendable {
@@ -294,26 +297,21 @@ public struct DockerPublishedPortParser: Sendable {
     }
 }
 
-public protocol ServiceProcess: AnyObject, Sendable {
-    var executableURL: URL? { get set }
-    var arguments: [String]? { get set }
-    var environment: [String: String]? { get set }
-    var standardOutput: Any? { get set }
-    var standardError: Any? { get set }
-    var terminationStatus: Int32 { get }
-
-    func run() throws
-    func waitUntilExit()
-    func terminate()
-}
-
-extension Process: ServiceProcess {}
-
 public struct SystemServiceCommandRunner: ServiceCommandRunning {
-    private let processFactory: @Sendable () -> any ServiceProcess
+    private let helperRunner: OwnedHelperRunner
+    private let environmentOverride: [String: String]?
 
-    public init(processFactory: @escaping @Sendable () -> any ServiceProcess = { Process() }) {
-        self.processFactory = processFactory
+    public init(processFactory: @escaping OwnedHelperRunner.ProcessFactory = { Process() }) {
+        helperRunner = OwnedHelperRunner(processFactory: processFactory)
+        environmentOverride = nil
+    }
+
+    init(
+        processFactory: @escaping OwnedHelperRunner.ProcessFactory,
+        environment: [String: String]
+    ) {
+        helperRunner = OwnedHelperRunner(processFactory: processFactory)
+        environmentOverride = environment
     }
 
     public func run(
@@ -322,36 +320,39 @@ public struct SystemServiceCommandRunner: ServiceCommandRunning {
         timeout: TimeInterval,
         environmentPath: String
     ) throws -> ServiceCommandResult {
-        let process = processFactory()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [executable] + arguments
-        process.environment = ProcessInfo.processInfo.environment.merging(["PATH": environmentPath]) { _, new in new }
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        try process.run()
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            process.waitUntilExit()
-            group.leave()
-        }
-        if group.wait(timeout: .now() + timeout) == .timedOut {
-            process.terminate()
-            DispatchQueue.global(qos: .utility).async {
-                process.waitUntilExit()
-            }
-            throw ServiceCommandError.timedOut
-        }
-
-        return ServiceCommandResult(
-            exitCode: process.terminationStatus,
-            stdout: String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
-            stderr: String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let inheritedEnvironment = environmentOverride ?? ProcessInfo.processInfo.environment
+        let environment = inheritedEnvironment.merging(["PATH": environmentPath]) { _, new in new }
+        let configuration = OwnedHelperConfiguration(
+            timeout: timeout,
+            outputLimit: OwnedHelperConfiguration.defaultOutputLimit,
+            terminationGrace: 0.25,
+            postExitDrainGrace: 0.25
         )
+
+        do {
+            let result = try helperRunner.run(
+                "/usr/bin/env",
+                arguments: [executable] + arguments,
+                environment: environment,
+                configuration: configuration
+            )
+            return ServiceCommandResult(
+                exitCode: result.exitCode,
+                stdout: result.stdout,
+                stderr: result.stderr
+            )
+        } catch let error as OwnedHelperError {
+            switch error {
+            case .launchFailed(let message):
+                throw ServiceCommandError.launchFailed(message)
+            case .timedOut:
+                throw ServiceCommandError.timedOut
+            case .outputLimitExceeded(let streams):
+                throw ServiceCommandError.outputLimitExceeded(streams: streams)
+            case .pipeDrainTimedOut:
+                throw ServiceCommandError.pipeDrainTimedOut
+            }
+        }
     }
 }
 
@@ -440,8 +441,19 @@ public struct ServiceMonitor: Sendable {
     }
 
     public func scanWithDetails() -> ServiceSnapshot {
-        let docker = dockerStatus()
-        let dockerContainerRows = docker.state == .running ? collectDockerContainerRows() : []
+        var docker = dockerStatus()
+        var dockerContainerRows: [DockerContainerPortRow] = []
+
+        if docker.state == .running {
+            do {
+                dockerContainerRows = try collectDockerContainerRows()
+            } catch ServiceCommandError.timedOut {
+                docker = ServiceStatus(name: "Docker", detail: "Details timeout", state: .unavailable, kind: .dockerDaemon)
+            } catch {
+                docker = ServiceStatus(name: "Docker", detail: "Details unavailable", state: .unavailable, kind: .dockerDaemon)
+            }
+        }
+
         return ServiceSnapshot(statuses: [docker] + databaseStatuses(), dockerContainerRows: dockerContainerRows)
     }
 
@@ -468,20 +480,16 @@ public struct ServiceMonitor: Sendable {
         return ServiceStatus(name: "Docker", detail: "Daemon", state: .stopped, kind: .dockerDaemon)
     }
 
-    private func collectDockerContainerRows() -> [DockerContainerPortRow] {
-        do {
-            let result = try runner.run(
-                "docker",
-                arguments: ["ps", "--format", "{{.Names}}\t{{.Ports}}"],
-                timeout: dockerCommandTimeout,
-                environmentPath: ServiceMonitor.dockerEnvironmentPath
-            )
-            guard result.succeeded else { return [] }
-            let containers = DockerPublishedPortParser().parse(result.stdout)
-            return DockerContainerPortRow.displayRows(for: containers)
-        } catch {
-            return []
-        }
+    private func collectDockerContainerRows() throws -> [DockerContainerPortRow] {
+        let result = try runner.run(
+            "docker",
+            arguments: ["ps", "--format", "{{.Names}}\t{{.Ports}}"],
+            timeout: dockerCommandTimeout,
+            environmentPath: ServiceMonitor.dockerEnvironmentPath
+        )
+        guard result.succeeded else { return [] }
+        let containers = DockerPublishedPortParser().parse(result.stdout)
+        return DockerContainerPortRow.displayRows(for: containers)
     }
 
     public func databaseStatuses(host: String = "127.0.0.1", group: ServiceGroup = .builtIn) -> [ServiceStatus] {

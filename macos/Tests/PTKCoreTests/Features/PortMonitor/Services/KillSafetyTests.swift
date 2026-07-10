@@ -1,3 +1,5 @@
+import Darwin
+import Foundation
 import Testing
 @testable import PTKCore
 
@@ -74,6 +76,20 @@ struct FakeConfirmer: KillConfirming {
         #expect(terminator.terminatedPIDs == [111])
     }
 
+    @Test func systemTerminatorSendsExactlyOneSIGTERM() {
+        var calls: [(pid: pid_t, signal: Int32)] = []
+        let terminator = SystemProcessTerminator { pid, signal in
+            calls.append((pid, signal))
+            return 0
+        }
+
+        #expect(terminator.terminate(pid: 111) == nil)
+        #expect(calls.count == 1)
+        #expect(calls.first?.pid == pid_t(111))
+        #expect(calls.first?.signal == SIGTERM)
+        #expect(calls.contains { $0.signal == SIGKILL } == false)
+    }
+
     @Test func pidChangeBlocksTermination() {
         let terminator = FakeTerminator()
         let service = KillService(
@@ -124,6 +140,43 @@ struct FakeConfirmer: KillConfirming {
         #expect(terminator.terminatedPIDs.isEmpty)
     }
 
+    @Test(arguments: [
+        (
+            ProcessRunnerError.launchFailed("not found"),
+            "process name lookup failed for PID 111: not found"
+        ),
+        (
+            ProcessRunnerError.timedOut,
+            "process name lookup failed for PID 111: process timed out"
+        ),
+        (
+            ProcessRunnerError.outputLimitExceeded(streams: [.stdout, .stderr]),
+            "process name lookup failed for PID 111: process output limit exceeded: stderr, stdout"
+        ),
+        (
+            ProcessRunnerError.pipeDrainTimedOut,
+            "process name lookup failed for PID 111: process output pipes did not close after exit"
+        )
+    ])
+    func processNameRunnerFailureBecomesResolverFailureWithoutTermination(
+        error: ProcessRunnerError,
+        expectedMessage: String
+    ) {
+        let runner = RevalidationProcessNameFailingRunner(error: error)
+        let terminator = FakeTerminator()
+        let service = KillService(
+            resolver: ProcessLookup(runner: runner),
+            terminator: terminator
+        )
+
+        #expect(throws: KillError.resolverFailed(expectedMessage)) {
+            try service.terminateAfterRevalidation(
+                target: KillTarget(port: 3000, pid: 111, processName: "node")
+            )
+        }
+        #expect(terminator.terminatedPIDs.isEmpty)
+    }
+
     @Test func terminationFailureIsSurfaced() {
         let terminator = FakeTerminator()
         terminator.failureMessage = "operation not permitted"
@@ -135,5 +188,26 @@ struct FakeConfirmer: KillConfirming {
         #expect(throws: KillError.terminationFailed("operation not permitted")) {
             try service.terminateAfterRevalidation(target: KillTarget(port: 3000, pid: 111, processName: "node"))
         }
+    }
+}
+
+private struct RevalidationProcessNameFailingRunner: ProcessRunning {
+    let error: ProcessRunnerError
+
+    func run(
+        _ executable: String,
+        arguments: [String],
+        timeout: TimeInterval
+    ) throws -> ProcessRunResult {
+        if executable == "ps" {
+            throw error
+        }
+        return ProcessRunResult(
+            exitCode: 0,
+            stdout: """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
+            """
+        )
     }
 }

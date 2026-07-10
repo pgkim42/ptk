@@ -102,7 +102,7 @@ private struct SnapshotSocketConnector: SocketConnecting {
 }
 
 private struct SnapshotProcessRunner: ProcessRunning {
-    func run(_ executable: String, arguments: [String]) throws -> ProcessRunResult {
+    func run(_ executable: String, arguments: [String], timeout: TimeInterval) throws -> ProcessRunResult {
         if executable == "lsof" {
             return ProcessRunResult(exitCode: 0, stdout: """
             COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
