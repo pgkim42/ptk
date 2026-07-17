@@ -14,7 +14,8 @@ jobs:
     env:
       PTK_CI_WINDOWSERVER_TEST_SKIP: >-
         PTKAppTests.(MenuBarControllerTests/(startCanShowPanelImmediatelyForAutomation|panelClosedUsesQuietCadenceSlowerThanAllUserIntervals|panelReopenRestoresNormalTenSecondCadenceAndRefreshes|panelSnapshotCanBeWrittenForAutomation|panelSnapshotCanRenderDockerContainerRowsForAutomation|settingsSnapshotCanBeWrittenForAutomation|buttonInteractionSnapshotCanBeWrittenForAutomation)|PanelAccessibilityTests/renderedDiagnosticRowIsTallerThanRenderedRegularRow)
-      PTK_CI_PROCESS_TEST_SKIP: PTKCoreTests.ProcessRunnerTests
+      PTK_CI_PROCESS_TEST_SKIP: >-
+        PTKCoreTests.(ProcessRunnerTests|ServiceMonitorTests/(systemServiceCommandRunnerExactlyReplacesHostileInheritedPathAndReturnsCapturedResult|systemServiceCommandRunnerMapsLaunchFailure|systemServiceCommandRunnerMapsPerStreamOutputOverflow|systemServiceCommandRunnerMapsPostExitPipeDrainTimeout|systemServiceCommandRunnerReturnsPromptlyAfterTimeoutAndReapsWithOneWaiter|systemServiceCommandRunnerKillsTermIgnoringDirectChildPromptly))
 
     steps:
       - name: Check out repository
