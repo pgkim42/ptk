@@ -21,7 +21,9 @@ jobs:
 
       - name: Test package
         timeout-minutes: 3
-        run: swift test --skip "$PTK_CI_WINDOWSERVER_TEST_SKIP"
+        run: |
+          swift test --filter PTKCoreTests
+          swift test --filter PTKAppTests --skip "$PTK_CI_WINDOWSERVER_TEST_SKIP"
         working-directory: macos
 
       - name: Build package

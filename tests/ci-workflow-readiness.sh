@@ -47,7 +47,8 @@ assert_contains .github/workflows/ci.yml "panelSnapshotCanRenderDockerContainerR
 assert_contains .github/workflows/ci.yml "settingsSnapshotCanBeWrittenForAutomation"
 assert_contains .github/workflows/ci.yml "buttonInteractionSnapshotCanBeWrittenForAutomation"
 assert_contains .github/workflows/ci.yml "renderedDiagnosticRowIsTallerThanRenderedRegularRow"
-assert_contains .github/workflows/ci.yml 'swift test --skip "$PTK_CI_WINDOWSERVER_TEST_SKIP"'
+assert_contains .github/workflows/ci.yml "swift test --filter PTKCoreTests"
+assert_contains .github/workflows/ci.yml 'swift test --filter PTKAppTests --skip "$PTK_CI_WINDOWSERVER_TEST_SKIP"'
 assert_contains .github/workflows/ci.yml "tests/open-source-readiness.sh"
 assert_contains .github/workflows/ci.yml "tests/release-readiness.sh"
 assert_contains .github/workflows/ci.yml "tests/ci-workflow-readiness.sh"
