@@ -32,3 +32,22 @@ Current Swift-only macOS release line.
 - Process termination remains fail-closed with confirmation, immediate target
   revalidation, mismatch and ambiguous-listener blocking, and `SIGTERM` only.
 - Process and scan command execution is asynchronous and lifecycle-safe.
+
+### Verification
+
+Run these commands from the repository root for the `0.5.0` release line:
+
+```bash
+cd macos && swift test
+cd macos && swift build
+cd macos && xcodebuild -scheme PTK -destination 'platform=macOS' test
+tests/open-source-readiness.sh
+tests/release-readiness.sh
+```
+
+### Known limitations
+
+- Release artifacts are unsigned and require the documented first-launch flow.
+- Updates are manual; PTK has no update server or in-app updater.
+- Scanning is limited to local development ports.
+- Service diagnostics are read-only and do not manage containers or databases.

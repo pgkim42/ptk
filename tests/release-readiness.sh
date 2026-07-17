@@ -28,6 +28,9 @@ assert_contains CHANGELOG.md "## [Unreleased]"
 assert_contains CHANGELOG.md "## [0.5.0]"
 assert_contains CHANGELOG.md "Current Swift-only macOS release line"
 assert_contains CHANGELOG.md "SIGTERM"
+assert_contains CHANGELOG.md "cd macos && swift test"
+assert_contains CHANGELOG.md "xcodebuild -scheme PTK"
+assert_contains CHANGELOG.md "### Known limitations"
 
 assert_file docs/roadmap.md
 assert_contains docs/roadmap.md "## v0.5.0 — current release line"
