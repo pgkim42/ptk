@@ -159,6 +159,14 @@ struct MenuBarStatusContent: Equatable {
     let toolTip: String
     let accessibilityLabel: String
 }
+
+struct SettingsDraft: Equatable {
+    var portExpression: String
+    var refreshInterval: RefreshInterval
+    var theme: AppTheme
+    var customPortProfiles: [PortProfile]
+    var customServiceEndpoints: [DatabaseEndpoint]
+}
 @MainActor
 final class PortMonitorViewModel: ObservableObject {
     @Published var statuses: [PortStatus] = []
@@ -166,6 +174,7 @@ final class PortMonitorViewModel: ObservableObject {
     @Published var dockerContainerRows: [DockerContainerPortRow] = []
     @Published var recentPortChanges: [PortChange] = []
     @Published var errorMessage: String?
+    @Published var settingsErrorMessage: String?
 
     @Published var portExpression: String
     @Published var refreshInterval: RefreshInterval
@@ -218,13 +227,29 @@ final class PortMonitorViewModel: ObservableObject {
         onOpenLocalhost: @escaping (URL) -> Void = { _ in },
         onCopyText: @escaping (String) -> Void = { _ in }
     ) {
+        var initialSettingsErrors: [String] = []
+        let initialProfiles: [PortProfile]
+        let initialEndpoints: [DatabaseEndpoint]
+        do {
+            initialProfiles = try settings.loadCustomPortProfiles()
+        } catch {
+            initialProfiles = []
+            initialSettingsErrors.append("\(error)")
+        }
+        do {
+            initialEndpoints = try settings.loadCustomServiceEndpoints()
+        } catch {
+            initialEndpoints = []
+            initialSettingsErrors.append("\(error)")
+        }
+
         self.settings = settings
         self.parser = parser
         self.portExpression = settings.watchedPortsExpression
         self.refreshInterval = settings.refreshInterval
         self.theme = settings.theme
-        self.customPortProfiles = settings.customPortProfiles
-        self.customServiceEndpoints = settings.customServiceEndpoints
+        self.customPortProfiles = initialProfiles
+        self.customServiceEndpoints = initialEndpoints
         self.onRefresh = onRefresh
         self.onSettingsRefresh = onSettingsRefresh
         self.onKill = onKill
@@ -232,6 +257,9 @@ final class PortMonitorViewModel: ObservableObject {
         self.onIntervalChange = onIntervalChange
         self.onOpenLocalhost = onOpenLocalhost
         self.onCopyText = onCopyText
+        self.settingsErrorMessage = initialSettingsErrors.isEmpty
+            ? nil
+            : initialSettingsErrors.joined(separator: "\n")
     }
 
     var portPresets: [PortPreset] {
@@ -351,9 +379,9 @@ final class PortMonitorViewModel: ObservableObject {
         customPortProfiles = settings.customPortProfiles
     }
 
-    func deleteCustomProfile(_ profile: PortProfile) {
-        settings.deleteCustomPortProfile(id: profile.id)
-        customPortProfiles = settings.customPortProfiles
+    func deleteCustomProfile(_ profile: PortProfile) throws {
+        try settings.deleteCustomPortProfile(id: profile.id)
+        customPortProfiles = try settings.loadCustomPortProfiles()
     }
 
     func saveCustomServiceEndpoint(name: String, portText: String) throws {
@@ -365,9 +393,9 @@ final class PortMonitorViewModel: ObservableObject {
         onSettingsRefresh()
     }
 
-    func deleteCustomServiceEndpoint(_ endpoint: DatabaseEndpoint) {
-        settings.deleteCustomServiceEndpoint(id: endpoint.id)
-        customServiceEndpoints = settings.customServiceEndpoints
+    func deleteCustomServiceEndpoint(_ endpoint: DatabaseEndpoint) throws {
+        try settings.deleteCustomServiceEndpoint(id: endpoint.id)
+        customServiceEndpoints = try settings.loadCustomServiceEndpoints()
         onSettingsRefresh()
     }
 
@@ -380,6 +408,59 @@ final class PortMonitorViewModel: ObservableObject {
     func saveTheme(_ theme: AppTheme) {
         settings.theme = theme
         self.theme = theme
+    }
+
+    func makeSettingsDraft() -> SettingsDraft {
+        SettingsDraft(
+            portExpression: portExpression,
+            refreshInterval: refreshInterval,
+            theme: theme,
+            customPortProfiles: customPortProfiles,
+            customServiceEndpoints: customServiceEndpoints
+        )
+    }
+
+    func addingCustomProfile(
+        title: String,
+        expression: String,
+        to profiles: [PortProfile]
+    ) throws -> [PortProfile] {
+        let profile = try settings.validatedPortProfile(title: title, expression: expression, parser: parser)
+        return ([profile] + profiles.filter { $0.id != profile.id })
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    func addingCustomServiceEndpoint(
+        name: String,
+        portText: String,
+        to endpoints: [DatabaseEndpoint]
+    ) throws -> [DatabaseEndpoint] {
+        guard let port = Int(portText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw AppSettingsError.invalidServicePort
+        }
+        let endpoint = try settings.validatedServiceEndpoint(name: name, port: port)
+        return ([endpoint] + endpoints.filter { $0.id != endpoint.id })
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func saveSettingsDraft(_ draft: SettingsDraft) throws {
+        _ = try parser.parse(draft.portExpression)
+        try settings.replaceCustomCollections(
+            profiles: draft.customPortProfiles,
+            serviceEndpoints: draft.customServiceEndpoints
+        )
+        settings.watchedPortsExpression = draft.portExpression
+        settings.refreshInterval = draft.refreshInterval
+        settings.theme = draft.theme
+
+        portExpression = draft.portExpression
+        refreshInterval = draft.refreshInterval
+        theme = draft.theme
+        customPortProfiles = draft.customPortProfiles
+        customServiceEndpoints = draft.customServiceEndpoints
+        settingsErrorMessage = nil
+        onIntervalChange(draft.refreshInterval)
+        onSettingsRefresh()
     }
 
     func openLocalhost(for status: PortStatus) {

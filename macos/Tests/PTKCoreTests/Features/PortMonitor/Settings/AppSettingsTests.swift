@@ -82,7 +82,7 @@ import Testing
         #expect(reloaded.customPortProfiles.map(\.title) == ["Frontend", "work api"])
         #expect(reloaded.customPortProfiles.map(\.expression) == ["3000,5173", "8080"])
 
-        reloaded.deleteCustomPortProfile(id: "frontend")
+        try reloaded.deleteCustomPortProfile(id: "frontend")
         #expect(reloaded.customPortProfiles.map(\.id) == ["work api"])
     }
 
@@ -98,7 +98,7 @@ import Testing
         #expect(reloaded.customServiceEndpoints.map(\.name) == ["LocalStack", "rabbitmq"])
         #expect(reloaded.customServiceEndpoints.map(\.port) == [4566, 5672])
 
-        reloaded.deleteCustomServiceEndpoint(id: "localstack-4566")
+        try reloaded.deleteCustomServiceEndpoint(id: "localstack-4566")
         #expect(reloaded.customServiceEndpoints.map(\.id) == ["rabbitmq-5672"])
     }
 
@@ -129,21 +129,53 @@ import Testing
         #expect(settings.customPortProfiles.isEmpty)
     }
 
-    @Test func customPortProfilesIgnoreMalformedStorage() {
-        let store = InMemorySettingsStore()
-        store.set("not json", forKey: AppSettings.Key.customPortProfiles)
+    @Test func missingCustomCollectionsLoadAsEmpty() throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
 
-        let settings = AppSettings(store: store)
-
-        #expect(settings.customPortProfiles.isEmpty)
+        #expect(try settings.loadCustomPortProfiles().isEmpty)
+        #expect(try settings.loadCustomServiceEndpoints().isEmpty)
     }
 
-    @Test func customServiceEndpointsIgnoreMalformedStorage() {
+    @Test func malformedProfileStorageIsReportedAndPreservedOnSaveAndDelete() {
         let store = InMemorySettingsStore()
-        store.set("not json", forKey: AppSettings.Key.customServiceEndpoints)
-
+        let original = #"not json"#
+        store.set(original, forKey: AppSettings.Key.customPortProfiles)
         let settings = AppSettings(store: store)
 
-        #expect(settings.customServiceEndpoints.isEmpty)
+        #expect(throws: AppSettingsError.corruptStoredValue(AppSettings.Key.customPortProfiles)) {
+            try settings.loadCustomPortProfiles()
+        }
+        #expect(throws: AppSettingsError.corruptStoredValue(AppSettings.Key.customPortProfiles)) {
+            try settings.saveCustomPortProfile(title: "New", expression: "3000")
+        }
+        #expect(throws: AppSettingsError.corruptStoredValue(AppSettings.Key.customPortProfiles)) {
+            try settings.deleteCustomPortProfile(id: "old")
+        }
+        #expect(store.string(forKey: AppSettings.Key.customPortProfiles) == original)
+    }
+
+    @Test func partiallyMalformedServiceStorageIsReportedAndPreserved() {
+        let store = InMemorySettingsStore()
+        let original = #"[{"name":"PostgreSQL","port":5432},{"name":"Broken"}]"#
+        store.set(original, forKey: AppSettings.Key.customServiceEndpoints)
+        let settings = AppSettings(store: store)
+
+        #expect(throws: AppSettingsError.corruptStoredValue(AppSettings.Key.customServiceEndpoints)) {
+            try settings.loadCustomServiceEndpoints()
+        }
+        #expect(throws: AppSettingsError.corruptStoredValue(AppSettings.Key.customServiceEndpoints)) {
+            try settings.saveCustomServiceEndpoint(name: "Redis", port: 6379)
+        }
+        #expect(store.string(forKey: AppSettings.Key.customServiceEndpoints) == original)
+    }
+
+    @Test func storedValueWithWrongTypeIsCorruptRatherThanMissing() {
+        let store = InMemorySettingsStore()
+        store.set(1.0, forKey: AppSettings.Key.customPortProfiles)
+        let settings = AppSettings(store: store)
+
+        #expect(throws: AppSettingsError.corruptStoredValue(AppSettings.Key.customPortProfiles)) {
+            try settings.loadCustomPortProfiles()
+        }
     }
 }

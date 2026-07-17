@@ -10,6 +10,11 @@ struct SettingsSheetView: View {
     @State private var serviceName = ""
     @State private var servicePort = ""
     @State private var serviceError: String?
+    @State private var customPortProfiles: [PortProfile]
+    @State private var customServiceEndpoints: [DatabaseEndpoint]
+    @State private var pendingProfileDeletion: PortProfile?
+    @State private var pendingServiceDeletion: DatabaseEndpoint?
+    @State private var settingsError: String?
 
     @ObservedObject var viewModel: PortMonitorViewModel
     let onDismiss: () -> Void
@@ -17,9 +22,15 @@ struct SettingsSheetView: View {
     init(viewModel: PortMonitorViewModel, onDismiss: @escaping () -> Void) {
         self.viewModel = viewModel
         self.onDismiss = onDismiss
-        _expression = State(initialValue: viewModel.portExpression)
-        _selectedInterval = State(initialValue: viewModel.refreshInterval)
-        _selectedTheme = State(initialValue: viewModel.theme)
+        let draft = viewModel.makeSettingsDraft()
+        _expression = State(initialValue: draft.portExpression)
+        _selectedInterval = State(initialValue: draft.refreshInterval)
+        _selectedTheme = State(initialValue: draft.theme)
+        _customPortProfiles = State(initialValue: draft.customPortProfiles)
+        _customServiceEndpoints = State(initialValue: draft.customServiceEndpoints)
+        _pendingProfileDeletion = State(initialValue: nil)
+        _pendingServiceDeletion = State(initialValue: nil)
+        _settingsError = State(initialValue: viewModel.settingsErrorMessage)
     }
 
     var body: some View {
@@ -27,6 +38,12 @@ struct SettingsSheetView: View {
             VStack(spacing: 16) {
                 Text("설정")
                 .font(.headline)
+
+            if let settingsError {
+                Text(settingsError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("감시 포트").font(.caption).foregroundStyle(.secondary)
@@ -81,9 +98,6 @@ struct SettingsSheetView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .accessibilityHint(SettingsAccessibility.themePickerHint)
-                .onChange(of: selectedTheme) { theme in
-                    viewModel.saveTheme(theme)
-                }
             }
 
             HStack {
@@ -94,12 +108,19 @@ struct SettingsSheetView: View {
 
                 Button("저장") {
                     do {
-                        try viewModel.saveExpression(expression)
-                        viewModel.saveInterval(selectedInterval)
-                        viewModel.saveTheme(selectedTheme)
+                        try viewModel.saveSettingsDraft(
+                            SettingsDraft(
+                                portExpression: expression,
+                                refreshInterval: selectedInterval,
+                                theme: selectedTheme,
+                                customPortProfiles: customPortProfiles,
+                                customServiceEndpoints: customServiceEndpoints
+                            )
+                        )
+                        settingsError = nil
                         onDismiss()
                     } catch {
-                        expressionError = "\(error)"
+                        settingsError = "\(error)"
                     }
                 }
                 .keyboardShortcut(.defaultAction)
@@ -111,7 +132,43 @@ struct SettingsSheetView: View {
         .frame(width: 320)
         .frame(maxHeight: 520)
         .background(Color(nsColor: .windowBackgroundColor))
-        .preferredColorScheme(viewModel.theme.preferredColorScheme)
+        .preferredColorScheme(selectedTheme.preferredColorScheme)
+        .alert(
+            "프로필 삭제",
+            isPresented: Binding(
+                get: { pendingProfileDeletion != nil },
+                set: { if !$0 { pendingProfileDeletion = nil } }
+            ),
+            presenting: pendingProfileDeletion
+        ) { profile in
+            Button("삭제", role: .destructive) {
+                customPortProfiles.removeAll { $0.id == profile.id }
+                pendingProfileDeletion = nil
+            }
+            Button("취소", role: .cancel) {
+                pendingProfileDeletion = nil
+            }
+        } message: { profile in
+            Text("‘\(profile.title)’ 프로필을 삭제합니다.")
+        }
+        .alert(
+            "서비스 삭제",
+            isPresented: Binding(
+                get: { pendingServiceDeletion != nil },
+                set: { if !$0 { pendingServiceDeletion = nil } }
+            ),
+            presenting: pendingServiceDeletion
+        ) { endpoint in
+            Button("삭제", role: .destructive) {
+                customServiceEndpoints.removeAll { $0.id == endpoint.id }
+                pendingServiceDeletion = nil
+            }
+            Button("취소", role: .cancel) {
+                pendingServiceDeletion = nil
+            }
+        } message: { endpoint in
+            Text("‘\(endpoint.name)’ 서비스를 삭제합니다.")
+        }
     }
 
     private var customProfilesSection: some View {
@@ -124,7 +181,11 @@ struct SettingsSheetView: View {
 
                 Button("저장") {
                     do {
-                        try viewModel.saveCustomProfile(title: profileTitle, expression: expression)
+                        customPortProfiles = try viewModel.addingCustomProfile(
+                            title: profileTitle,
+                            expression: expression,
+                            to: customPortProfiles
+                        )
                         profileTitle = ""
                         expressionError = nil
                     } catch {
@@ -136,9 +197,9 @@ struct SettingsSheetView: View {
                 .accessibilityHint("이름 \(profileTitle)의 프로필에 현재 감시 포트를 저장합니다.")
             }
 
-            if !viewModel.customPortProfiles.isEmpty {
+            if !customPortProfiles.isEmpty {
                 VStack(spacing: 6) {
-                    ForEach(viewModel.customPortProfiles) { profile in
+                    ForEach(customPortProfiles) { profile in
                         customProfileRow(profile)
                     }
                 }
@@ -149,13 +210,8 @@ struct SettingsSheetView: View {
     private func customProfileRow(_ profile: PortProfile) -> some View {
         HStack(spacing: 6) {
             Button {
-                do {
-                    try viewModel.applyProfile(profile)
-                    expression = profile.expression
-                    expressionError = nil
-                } catch {
-                    expressionError = "\(error)"
-                }
+                expression = profile.expression
+                expressionError = nil
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(profile.title)
@@ -184,7 +240,7 @@ struct SettingsSheetView: View {
             .accessibilityHint(SettingsAccessibility.profileApplyHint(profile))
 
             Button {
-                viewModel.deleteCustomProfile(profile)
+                pendingProfileDeletion = profile
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 10, weight: .semibold))
@@ -211,7 +267,11 @@ struct SettingsSheetView: View {
 
                 Button("추가") {
                     do {
-                        try viewModel.saveCustomServiceEndpoint(name: serviceName, portText: servicePort)
+                        customServiceEndpoints = try viewModel.addingCustomServiceEndpoint(
+                            name: serviceName,
+                            portText: servicePort,
+                            to: customServiceEndpoints
+                        )
                         serviceName = ""
                         servicePort = ""
                         serviceError = nil
@@ -230,9 +290,9 @@ struct SettingsSheetView: View {
                     .foregroundStyle(.red)
             }
 
-            if !viewModel.customServiceEndpoints.isEmpty {
+            if !customServiceEndpoints.isEmpty {
                 VStack(spacing: 6) {
-                    ForEach(viewModel.customServiceEndpoints) { endpoint in
+                    ForEach(customServiceEndpoints) { endpoint in
                         customServiceRow(endpoint)
                     }
                 }
@@ -264,7 +324,7 @@ struct SettingsSheetView: View {
             }
 
             Button {
-                viewModel.deleteCustomServiceEndpoint(endpoint)
+                pendingServiceDeletion = endpoint
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 10, weight: .semibold))

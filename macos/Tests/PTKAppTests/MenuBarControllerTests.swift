@@ -1420,6 +1420,73 @@ import Testing
         #expect(reloaded.theme == .light)
     }
 
+    @Test func settingsDraftChangesAreDiscardedWithoutSave() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+        try settings.saveCustomPortProfile(title: "Original", expression: "3000")
+        try settings.saveCustomServiceEndpoint(name: "Redis", port: 6379)
+        settings.theme = .system
+        let viewModel = makeViewModel(settings: settings)
+
+        var draft = viewModel.makeSettingsDraft()
+        draft.theme = .dark
+        draft.customPortProfiles = try viewModel.addingCustomProfile(
+            title: "Temporary",
+            expression: "5173",
+            to: draft.customPortProfiles
+        )
+        draft.customPortProfiles.removeAll { $0.title == "Original" }
+        draft.customServiceEndpoints.removeAll()
+
+        let reloaded = AppSettings(store: store)
+        #expect(reloaded.theme == .system)
+        #expect(try reloaded.loadCustomPortProfiles().map(\.title) == ["Original"])
+        #expect(try reloaded.loadCustomServiceEndpoints().map(\.name) == ["Redis"])
+    }
+
+    @Test func saveSettingsDraftPersistsAllChangesAndNotifiesOnce() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+        var refreshCount = 0
+        var changedInterval: RefreshInterval?
+        let viewModel = makeViewModel(
+            settings: settings,
+            onSettingsRefresh: { refreshCount += 1 },
+            onIntervalChange: { changedInterval = $0 }
+        )
+        let draft = SettingsDraft(
+            portExpression: "3000,5173",
+            refreshInterval: .tenSeconds,
+            theme: .dark,
+            customPortProfiles: [PortProfile(id: "web", title: "Web", expression: "5173")],
+            customServiceEndpoints: [DatabaseEndpoint(name: "Redis", port: 6379)]
+        )
+
+        try viewModel.saveSettingsDraft(draft)
+
+        let reloaded = AppSettings(store: store)
+        #expect(reloaded.watchedPortsExpression == "3000,5173")
+        #expect(reloaded.refreshInterval == .tenSeconds)
+        #expect(reloaded.theme == .dark)
+        #expect(try reloaded.loadCustomPortProfiles() == draft.customPortProfiles)
+        #expect(try reloaded.loadCustomServiceEndpoints() == draft.customServiceEndpoints)
+        #expect(refreshCount == 1)
+        #expect(changedInterval == .tenSeconds)
+    }
+
+    @Test func corruptSettingsAreVisibleAndDraftSavePreservesOriginal() {
+        let store = InMemorySettingsStore()
+        let original = #"not json"#
+        store.set(original, forKey: AppSettings.Key.customPortProfiles)
+        let viewModel = makeViewModel(settings: AppSettings(store: store))
+
+        #expect(viewModel.settingsErrorMessage?.contains(AppSettings.Key.customPortProfiles) == true)
+        #expect(throws: AppSettingsError.corruptStoredValue(AppSettings.Key.customPortProfiles)) {
+            try viewModel.saveSettingsDraft(viewModel.makeSettingsDraft())
+        }
+        #expect(store.string(forKey: AppSettings.Key.customPortProfiles) == original)
+    }
+
     @Test func applyPresetPersistsExpressionAndRefreshes() throws {
         let store = InMemorySettingsStore()
         let settings = AppSettings(store: store)
@@ -1457,7 +1524,7 @@ import Testing
         #expect(viewModel.portExpression == "3000,5173")
         #expect(refreshCount == 1)
 
-        viewModel.deleteCustomProfile(viewModel.customPortProfiles[0])
+        try viewModel.deleteCustomProfile(viewModel.customPortProfiles[0])
         #expect(viewModel.customPortProfiles.isEmpty)
         #expect(AppSettings(store: store).customPortProfiles.isEmpty)
     }
@@ -1499,7 +1566,7 @@ import Testing
         #expect(viewModel.customServiceEndpoints == [DatabaseEndpoint(name: "RabbitMQ", port: 5672)])
         #expect(refreshCount == 1)
 
-        viewModel.deleteCustomServiceEndpoint(viewModel.customServiceEndpoints[0])
+        try viewModel.deleteCustomServiceEndpoint(viewModel.customServiceEndpoints[0])
         #expect(viewModel.customServiceEndpoints.isEmpty)
         #expect(AppSettings(store: store).customServiceEndpoints.isEmpty)
         #expect(refreshCount == 2)
