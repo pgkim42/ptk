@@ -18,7 +18,7 @@ jobs:
 
       - name: Test package
         timeout-minutes: 2
-        run: swift test --filter 'AppSettingsTests|KillSafetyTests|LsofParserTests|MenuModelTests|PortRangeParserTests|PortScannerTests|ProcessLookupTests|RefreshSchedulerTests'
+        run: swift test --filter 'AppSettingsTests|KillSafetyTests|LsofParserTests|MenuModelTests|PortRangeParserTests|PortScannerTests|ProcessLookupTests|RefreshSchedulerTests|PortChangeNotificationCoordinatorTests|UserNotificationClientTests|PortChangeNotificationIntegrationTests|PortChangeNotificationAccessibilityTests'
         working-directory: macos
 
       - name: Build package

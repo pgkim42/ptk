@@ -51,7 +51,11 @@ assert_contains README.md "A native macOS menu bar utility for safely inspecting
 assert_contains README.md "![PTK menu bar panel](docs/assets/ptk-panel.png)"
 assert_contains README.md "## Why PTK?"
 assert_contains README.md "## Project Health"
-assert_contains README.md "PTK-macos-0.5.0-unsigned.dmg"
+assert_contains README.md "Current release preparation: \`0.6.0\`"
+assert_contains README.md "Latest published artifacts: \`0.5.0\`"
+assert_contains README.md "### Port-Change Notifications"
+assert_contains README.md "opt-in local notification for selected"
+assert_contains README.md "reliable open and closed transitions"
 assert_contains README.md "This release is unsigned"
 assert_contains README.md "PTK does not include automatic updates yet"
 assert_contains README.ko.md "SPDX-License-Identifier: 0BSD"
@@ -64,7 +68,11 @@ assert_contains README.ko.md "로컬 개발 포트를 안전하게 확인하고 
 assert_contains README.ko.md "![PTK 메뉴 막대 패널](docs/assets/ptk-panel.png)"
 assert_contains README.ko.md "## 왜 PTK인가?"
 assert_contains README.ko.md "## 프로젝트 상태"
-assert_contains README.ko.md "PTK-macos-0.5.0-unsigned.dmg"
+assert_contains README.ko.md "현재 릴리스 준비 버전: \`0.6.0\`"
+assert_contains README.ko.md "최신 공개 배포 파일: \`0.5.0\`"
+assert_contains README.ko.md "### 포트 변경 알림"
+assert_contains README.ko.md "선택한 포트의 로컬 알림"
+assert_contains README.ko.md "신뢰할 수 있는 열림과 닫힘 전환"
 assert_contains README.ko.md "현재 릴리스는 서명되지 않았습니다"
 assert_contains README.ko.md "아직 자동 업데이트를 포함하지 않습니다"
 assert_file docs/assets/ptk-panel.png
@@ -97,7 +105,7 @@ assert_contains .github/workflows/ci.yml "swift test"
 assert_contains .github/workflows/ci.yml "swift build"
 assert_contains .github/workflows/ci.yml "tests/release-readiness.sh"
 assert_contains .github/workflows/ci.yml "tests/ci-workflow-readiness.sh"
-assert_not_contains .github/workflows/ci.yml "xcodebuild -scheme PTK"
+assert_not_contains .github/workflows/ci.yml "xcodebuild"
 
 assert_file .github/ISSUE_TEMPLATE/bug_report.yml
 assert_file .github/ISSUE_TEMPLATE/feature_request.yml
@@ -107,10 +115,11 @@ assert_contains .github/pull_request_template.md "Swift-only runtime boundary"
 
 assert_contains .gitignore ".codegraph/"
 assert_contains .gitignore "dist/"
-assert_contains tests/package-readiness.sh "package-readiness"
 assert_not_exists package.json
 assert_not_exists package-lock.json
 assert_not_exists src-tauri
 assert_not_exists ui
 
+assert_file tests/package-readiness.sh
+tests/package-readiness.sh
 pass "open-source-readiness"
