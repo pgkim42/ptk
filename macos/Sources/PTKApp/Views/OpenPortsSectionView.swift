@@ -46,10 +46,28 @@ struct OpenPortsSectionView: View {
     }
 
     private var openPortsListHeight: CGFloat {
-        let rowHeight: CGFloat = 34
         let maxVisibleRows = viewModel.serviceStatuses.isEmpty ? 6 : 4
-        let visibleRows = min(max(viewModel.openPorts.count, 1), maxVisibleRows)
-        return CGFloat(visibleRows) * rowHeight
+        return OpenPortsListMetrics.height(
+            for: viewModel.openPorts,
+            maxVisibleRows: maxVisibleRows
+        )
+    }
+}
+
+enum PortRowMetrics {
+    static let regularHeight: CGFloat = 34
+    static let diagnosticHeight: CGFloat = 44
+
+    static func height(for status: PortStatus) -> CGFloat {
+        status.ptkKillUnavailableReason == nil ? regularHeight : diagnosticHeight
+    }
+}
+
+enum OpenPortsListMetrics {
+    static func height(for statuses: [PortStatus], maxVisibleRows: Int) -> CGFloat {
+        statuses
+            .prefix(max(maxVisibleRows, 1))
+            .reduce(0) { $0 + PortRowMetrics.height(for: $1) }
     }
 }
 

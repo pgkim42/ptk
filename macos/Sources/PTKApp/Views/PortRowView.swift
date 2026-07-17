@@ -14,6 +14,7 @@ struct PortRowView: View {
                 Circle()
                     .fill(PTKTheme.green)
                     .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
 
                 Text(verbatim: "\(status.port)")
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
@@ -58,6 +59,8 @@ struct PortRowView: View {
                 }
                 .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
                 .help("localhost 열기")
+                .accessibilityLabel(PortRowAccessibility.openLabel(for: status))
+                .accessibilityHint(PortRowAccessibility.openHint(for: status))
 
                 Button {
                     onCopy(status)
@@ -67,6 +70,8 @@ struct PortRowView: View {
                 }
                 .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
                 .help("localhost URL 복사")
+                .accessibilityLabel(PortRowAccessibility.copyURLLabel(for: status))
+                .accessibilityHint(PortRowAccessibility.copyURLHint(for: status))
 
                 Button {
                     onCopyDetails(status)
@@ -76,6 +81,8 @@ struct PortRowView: View {
                 }
                 .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
                 .help("포트 정보 복사")
+                .accessibilityLabel(PortRowAccessibility.copyDetailsLabel(for: status))
+                .accessibilityHint(PortRowAccessibility.copyDetailsHint(for: status))
 
                 if let target = status.killTarget {
                     Button {
@@ -86,12 +93,15 @@ struct PortRowView: View {
                     }
                     .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.red, size: 22))
                     .help("프로세스 종료")
+                    .accessibilityLabel(PortRowAccessibility.killLabel(for: target))
+                    .accessibilityHint(PortRowAccessibility.killHint)
                 } else if let reason = status.ptkKillUnavailableReason {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(PTKTheme.orange)
                         .frame(width: 22, height: 22)
                         .help(reason)
+                        .accessibilityLabel(PortRowAccessibility.diagnosticLabel(for: status, reason: reason))
                 }
             }
 
@@ -107,11 +117,13 @@ struct PortRowView: View {
                 .foregroundStyle(PTKTheme.orange)
                 .padding(.leading, 61)
                 .help(diagnosticHelpText(diagnostic))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(PortRowAccessibility.diagnosticLabel(for: status, reason: diagnosticHelpText(diagnostic)))
             }
         }
         .padding(.horizontal, 9)
         .padding(.vertical, status.ptkKillUnavailableReason == nil ? 0 : 4)
-        .frame(minHeight: status.ptkKillUnavailableReason == nil ? 29 : 44)
+        .frame(minHeight: PortRowMetrics.height(for: status))
         .background(Color.clear)
     }
 
@@ -130,5 +142,47 @@ struct PortRowView: View {
         [diagnostic.title, diagnostic.detail, diagnostic.hint]
             .compactMap { $0 }
             .joined(separator: "\n")
+    }
+}
+
+enum PortRowAccessibility {
+    static func openLabel(for status: PortStatus) -> String {
+        "포트 \(status.port) localhost 열기"
+    }
+
+    static func openHint(for status: PortStatus) -> String {
+        "기본 웹 브라우저에서 http://localhost:\(status.port)을 엽니다."
+    }
+
+    static func copyURLLabel(for status: PortStatus) -> String {
+        "포트 \(status.port) localhost URL 복사"
+    }
+
+    static func copyURLHint(for status: PortStatus) -> String {
+        "http://localhost:\(status.port)을 클립보드에 복사합니다."
+    }
+
+    static func copyDetailsLabel(for status: PortStatus) -> String {
+        "포트 \(status.port) 정보 복사"
+    }
+
+    static func copyDetailsHint(for status: PortStatus) -> String {
+        let process: String
+        if let processName = status.processName, !processName.isEmpty {
+            process = processName
+        } else {
+            process = "알 수 없는 프로세스"
+        }
+        return "\(process)의 포트 정보를 클립보드에 복사합니다."
+    }
+
+    static func killLabel(for target: KillTarget) -> String {
+        "포트 \(target.port), \(target.processName), PID \(target.pid) 프로세스 종료"
+    }
+
+    static let killHint = "확인 후 프로세스에 SIGTERM 신호를 보냅니다."
+
+    static func diagnosticLabel(for status: PortStatus, reason: String) -> String {
+        "포트 \(status.port) 프로세스 종료 불가: \(reason)"
     }
 }

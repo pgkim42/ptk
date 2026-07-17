@@ -61,22 +61,26 @@ struct SettingsSheetView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("새로고침 주기").font(.caption).foregroundStyle(.secondary)
-                Picker("", selection: $selectedInterval) {
+                Picker(SettingsAccessibility.refreshIntervalPickerLabel, selection: $selectedInterval) {
                     ForEach(RefreshInterval.allCases, id: \.self) { interval in
                         Text(interval.label).tag(interval)
                     }
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityHint(SettingsAccessibility.refreshIntervalPickerHint)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("테마").font(.caption).foregroundStyle(.secondary)
-                Picker("", selection: $selectedTheme) {
+                Picker(SettingsAccessibility.themePickerLabel, selection: $selectedTheme) {
                     ForEach(AppTheme.allCases, id: \.self) { theme in
                         Text(theme.label).tag(theme)
                     }
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityHint(SettingsAccessibility.themePickerHint)
                 .onChange(of: selectedTheme) { theme in
                     viewModel.saveTheme(theme)
                 }
@@ -128,6 +132,8 @@ struct SettingsSheetView: View {
                     }
                 }
                 .disabled(profileTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || expression.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("사용자 프로필 저장")
+                .accessibilityHint("이름 \(profileTitle)의 프로필에 현재 감시 포트를 저장합니다.")
             }
 
             if !viewModel.customPortProfiles.isEmpty {
@@ -174,6 +180,8 @@ struct SettingsSheetView: View {
             }
             .buttonStyle(.plain)
             .help("프로필 적용: \(profile.expression)")
+            .accessibilityLabel(SettingsAccessibility.profileApplyLabel(profile))
+            .accessibilityHint(SettingsAccessibility.profileApplyHint(profile))
 
             Button {
                 viewModel.deleteCustomProfile(profile)
@@ -184,6 +192,8 @@ struct SettingsSheetView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .help("프로필 삭제")
+            .accessibilityLabel(SettingsAccessibility.profileDeleteLabel(profile))
+            .accessibilityHint("이 사용자 프로필을 삭제합니다.")
         }
     }
 
@@ -210,6 +220,8 @@ struct SettingsSheetView: View {
                     }
                 }
                 .disabled(serviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || servicePort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("서비스 \(serviceName) 추가")
+                .accessibilityHint("포트 \(servicePort)의 서비스를 상태 목록에 추가합니다.")
             }
 
             if let serviceError {
@@ -260,6 +272,8 @@ struct SettingsSheetView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .help("서비스 삭제")
+            .accessibilityLabel(SettingsAccessibility.serviceDeleteLabel(endpoint))
+            .accessibilityHint("이 서비스 포트를 상태 목록에서 삭제합니다.")
         }
     }
     private func presetButton(_ preset: PortPreset) -> some View {
@@ -291,5 +305,37 @@ struct SettingsSheetView: View {
         }
         .buttonStyle(.plain)
         .help(preset.expression)
+        .accessibilityLabel(SettingsAccessibility.presetApplyLabel(preset))
+        .accessibilityHint(SettingsAccessibility.presetApplyHint(preset))
+    }
+}
+
+enum SettingsAccessibility {
+    static let refreshIntervalPickerLabel = "새로고침 주기"
+    static let refreshIntervalPickerHint = "포트와 서비스 상태를 자동으로 확인할 주기를 선택합니다."
+    static let themePickerLabel = "테마"
+    static let themePickerHint = "PTK 화면에 사용할 밝기 테마를 선택합니다."
+    static func profileApplyLabel(_ profile: PortProfile) -> String {
+        "프로필 \(profile.title) 적용"
+    }
+
+    static func profileApplyHint(_ profile: PortProfile) -> String {
+        "감시 포트를 \(profile.expression)(으)로 변경합니다."
+    }
+
+    static func profileDeleteLabel(_ profile: PortProfile) -> String {
+        "프로필 \(profile.title) 삭제"
+    }
+
+    static func serviceDeleteLabel(_ endpoint: DatabaseEndpoint) -> String {
+        "서비스 \(endpoint.name), 포트 \(endpoint.port) 삭제"
+    }
+
+    static func presetApplyLabel(_ preset: PortPreset) -> String {
+        "포트 프리셋 \(preset.title) 적용"
+    }
+
+    static func presetApplyHint(_ preset: PortPreset) -> String {
+        "감시 포트를 \(preset.expression)(으)로 변경합니다."
     }
 }

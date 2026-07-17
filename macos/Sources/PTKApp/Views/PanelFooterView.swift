@@ -16,15 +16,27 @@ struct PanelFooterView: View {
 
             Spacer()
 
-            PanelIconButton(systemName: "doc.on.doc", help: "열린 포트 요약 복사") {
+            PanelIconButton(
+                systemName: "doc.on.doc",
+                help: "열린 포트 요약 복사",
+                accessibilityHint: "현재 열린 모든 포트의 정보를 클립보드에 복사합니다."
+            ) {
                 viewModel.copyOpenPortsSummary()
             }
 
-            PanelIconButton(systemName: "gearshape", help: "설정") {
+            PanelIconButton(
+                systemName: "gearshape",
+                help: "설정 열기",
+                accessibilityHint: "감시 포트, 새로고침 주기와 테마 설정을 엽니다."
+            ) {
                 viewModel.isShowingSettings = true
             }
 
-            PanelIconButton(systemName: "power", help: "종료") {
+            PanelIconButton(
+                systemName: "power",
+                help: "PTK 종료",
+                accessibilityHint: "PTK 메뉴 막대 앱을 종료합니다."
+            ) {
                 NSApplication.shared.terminate(nil)
             }
         }
@@ -45,6 +57,8 @@ struct PanelFooterView: View {
                 } label: {
                     Text(option.title)
                 }
+                    .accessibilityLabel("프로필 \(option.title) 적용")
+                    .accessibilityHint("감시 포트를 \(option.expression)(으)로 변경합니다.")
             }
         } label: {
             HStack(spacing: 4) {
@@ -64,5 +78,7 @@ struct PanelFooterView: View {
         .menuStyle(.borderlessButton)
         .fixedSize(horizontal: true, vertical: false)
         .help("감시 포트 프로필 빠른 전환")
+        .accessibilityLabel("감시 포트 프로필 선택, 현재 \(viewModel.currentProfileTitle)")
+        .accessibilityHint("적용할 감시 포트 프로필 메뉴를 엽니다.")
     }
 }
