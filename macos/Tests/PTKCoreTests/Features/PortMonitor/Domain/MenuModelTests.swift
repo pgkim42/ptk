@@ -79,6 +79,97 @@ import Testing
         #expect(safe.killUnavailableCause == nil)
     }
 
+    @Test func verifiedIdentityValidatesAndPortStatusNormalizesIdentity() throws {
+        let identity = try #require(VerifiedProcessIdentity(pid: 42, processName: "  node \n"))
+        #expect(identity.pid == 42)
+        #expect(identity.processName == "node")
+        #expect(VerifiedProcessIdentity(pid: 0, processName: "node") == nil)
+        #expect(VerifiedProcessIdentity(pid: 42, processName: " \n") == nil)
+
+        let open = PortStatus(port: 3000, isOpen: true, identityState: .verified(identity))
+        #expect(open.identityState == .verified(identity))
+        #expect(open.verifiedIdentity == identity)
+        #expect(open.pid == 42)
+        #expect(open.processName == "node")
+        #expect(open.message == nil)
+        #expect(open.killTarget == KillTarget(port: 3000, pid: 42, processName: "node"))
+
+        let legacyOpen = PortStatus(
+            port: 3000,
+            isOpen: true,
+            pid: 42,
+            processName: "  node \n"
+        )
+        #expect(legacyOpen.identityState == .verified(identity))
+        #expect(legacyOpen.killTarget == open.killTarget)
+
+        let openWithoutIdentity = PortStatus(port: 3001, isOpen: true, identityState: nil)
+        #expect(openWithoutIdentity.identityState == .unavailable(.noVerifiedListener))
+        #expect(openWithoutIdentity.killTarget == nil)
+
+        let closed = PortStatus(port: 3002, isOpen: false, identityState: .verified(identity))
+        #expect(closed.identityState == nil)
+        #expect(closed.verifiedIdentity == nil)
+        #expect(closed.pid == nil)
+        #expect(closed.processName == nil)
+        #expect(closed.message == nil)
+        #expect(closed.killTarget == nil)
+    }
+
+    @Test func menuRowNeverBuildsKillTargetFromUnavailableIdentityProjections() {
+        let status = PortStatus(
+            port: 3000,
+            isOpen: true,
+            identityState: .unavailable(.processNameUnavailable(pid: 42))
+        )
+
+        let row = PortMenuRow(status: status)
+
+        #expect(status.pid == nil)
+        #expect(status.processName == nil)
+        #expect(row.pid == nil)
+        #expect(row.processName == nil)
+        #expect(row.killTarget == nil)
+        #expect(!row.canRequestKill)
+        #expect(row.killUnavailableCause == .missingProcessName(pid: 42))
+    }
+
+    @Test func portChangeBaselineRetainsVerifiedIdentityThroughUnavailableSamples() throws {
+        let identityA = try #require(VerifiedProcessIdentity(pid: 10, processName: "node"))
+        let identityB = try #require(VerifiedProcessIdentity(pid: 20, processName: "vite"))
+        let verifiedA = PortStatus(port: 3000, isOpen: true, identityState: .verified(identityA))
+        let verifiedB = PortStatus(port: 3000, isOpen: true, identityState: .verified(identityB))
+        let lookupFailure = PortStatus(
+            port: 3000,
+            isOpen: true,
+            identityState: .unavailable(.lookupFailed(message: "lsof failed"))
+        )
+        let ambiguity = PortStatus(
+            port: 3000,
+            isOpen: true,
+            identityState: .unavailable(.ambiguousListeners(pids: [10, 20]))
+        )
+
+        #expect(PortChange.detect(previous: [verifiedA], current: [lookupFailure]).isEmpty)
+        let afterFailure = PortChange.mergedBaseline(previous: [verifiedA], current: [lookupFailure])
+        #expect(afterFailure == [verifiedA])
+
+        #expect(PortChange.detect(previous: afterFailure, current: [verifiedA]).isEmpty)
+        let afterRecovery = PortChange.mergedBaseline(previous: afterFailure, current: [verifiedA])
+        #expect(afterRecovery == [verifiedA])
+
+        #expect(PortChange.detect(previous: afterRecovery, current: [ambiguity]).isEmpty)
+        let afterAmbiguity = PortChange.mergedBaseline(previous: afterRecovery, current: [ambiguity])
+        #expect(afterAmbiguity == [verifiedA])
+        #expect(PortChange.detect(previous: [ambiguity], current: [verifiedB]).isEmpty)
+
+        let changes = PortChange.detect(previous: afterAmbiguity, current: [verifiedB])
+        #expect(changes.count == 1)
+        #expect(changes.first?.kind == .changed)
+        #expect(changes.first?.pid == 20)
+        #expect(changes.first?.processName == "vite")
+    }
+
     @Test func portChangesDetectOpenClosedAndProcessUpdates() {
         let occurredAt = Date(timeIntervalSince1970: 1_700_000_000)
         let previous = [

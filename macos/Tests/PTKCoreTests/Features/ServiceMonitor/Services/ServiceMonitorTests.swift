@@ -464,6 +464,44 @@ import Testing
             ServiceStatus(name: "RabbitMQ", detail: "Port 5672", state: .running, group: .custom)
         ])
     }
+
+    @Test func ipv6OnlyDatabaseListenerIsRunning() {
+        let connector = RecordingServiceSocketChecker(
+            openHostsByPort: [5432: ["::1"]]
+        )
+        let monitor = ServiceMonitor(
+            runner: FakeServiceCommandRunner(),
+            connector: connector,
+            databaseEndpoints: [DatabaseEndpoint(name: "PostgreSQL", port: 5432)],
+            timeout: 1
+        )
+
+        #expect(monitor.databaseStatuses() == [
+            ServiceStatus(name: "PostgreSQL", detail: "Port 5432", state: .running)
+        ])
+        #expect(connector.calls.map(\.host) == ["127.0.0.1", "::1"])
+    }
+
+    @Test func serviceSocketCheckerUsesSharedAbsoluteProbeBudget() {
+        let clock = ServiceProbeClock()
+        let connector = RecordingServiceSocketChecker(
+            openHostsByPort: [5432: ["::1"]],
+            elapsedByHost: ["127.0.0.1": 0.125, "::1": 0.25],
+            clock: clock
+        )
+
+        let isOpen = connector.isListeningOnLocalhost(
+            port: 5432,
+            timeout: 1,
+            now: { clock.now }
+        )
+        #expect(isOpen)
+        #expect(connector.calls == [
+            ServiceSocketProbeCall(host: "127.0.0.1", port: 5432, timeout: 0.5),
+            ServiceSocketProbeCall(host: "::1", port: 5432, timeout: 0.875)
+        ])
+        #expect(clock.now == 0.375)
+    }
 }
 
 private enum DockerPsSentinelError: Error {
@@ -506,6 +544,61 @@ private struct FakeServiceSocketChecker: ServiceSocketChecking {
 
     func isListening(host: String, port: UInt16, timeout: TimeInterval) -> Bool {
         openPorts.contains(port)
+    }
+}
+
+private struct ServiceSocketProbeCall: Equatable {
+    let host: String
+    let port: UInt16
+    let timeout: TimeInterval
+}
+
+private final class ServiceProbeClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedNow: TimeInterval = 0
+
+    var now: TimeInterval {
+        lock.withLock { storedNow }
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.withLock {
+            storedNow += interval
+        }
+    }
+}
+
+private final class RecordingServiceSocketChecker: ServiceSocketChecking, @unchecked Sendable {
+    private let lock = NSLock()
+    private let openHostsByPort: [UInt16: Set<String>]
+    private let elapsedByHost: [String: TimeInterval]
+    private let clock: ServiceProbeClock?
+    private var storedCalls: [ServiceSocketProbeCall] = []
+
+    init(
+        openHostsByPort: [UInt16: Set<String>] = [:],
+        elapsedByHost: [String: TimeInterval] = [:],
+        clock: ServiceProbeClock? = nil
+    ) {
+        self.openHostsByPort = openHostsByPort
+        self.elapsedByHost = elapsedByHost
+        self.clock = clock
+    }
+
+    var calls: [ServiceSocketProbeCall] {
+        lock.withLock { storedCalls }
+    }
+
+    func isListening(host: String, port: UInt16, timeout: TimeInterval) -> Bool {
+        lock.withLock {
+            storedCalls.append(
+                ServiceSocketProbeCall(host: host, port: port, timeout: timeout)
+            )
+        }
+
+        let elapsed = elapsedByHost[host] ?? 0
+        clock?.advance(by: min(elapsed, max(timeout, 0)))
+        return openHostsByPort[port]?.contains(host) == true && elapsed <= timeout
     }
 }
 

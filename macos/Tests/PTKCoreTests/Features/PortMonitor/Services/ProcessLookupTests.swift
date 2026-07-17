@@ -3,43 +3,129 @@ import Foundation
 @testable import PTKCore
 
 @Suite struct ProcessLookupTests {
-    @Test func mapsLsofOutputToPIDSetMap() throws {
-        let runner = FakeProcessRunner()
-        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
-            exitCode: 0,
-            stdout: """
-COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
-"""
-        )
-
-        let lookup = ProcessLookup(runner: runner)
-        #expect(try lookup.listeningPortPIDMap() == [3000: Set([111])])
-    }
-
-    @Test func infoRejectsAmbiguousListenersForPort() {
+    @Test func mapsOnlyTrustedLocalLsofOutputToCompatibilityPIDSetMap() throws {
         let runner = FakeProcessRunner()
         runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
             exitCode: 0,
             stdout: """
             COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
             node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
-            vite    222 me   1u IPv4 0x2    0t0      TCP *:3000 (LISTEN)
+            remote  222 me   2u IPv4 0x2    0t0      TCP 192.0.2.1:4000 (LISTEN)
             """
         )
 
         let lookup = ProcessLookup(runner: runner)
+
+        #expect(try lookup.listeningPortPIDMap() == [3000: Set([111])])
+    }
+
+    @Test func listeningSnapshotInvokesLsofExactlyOnce() throws {
+        let runner = FakeProcessRunner()
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 0,
+            stdout: """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            node    111 me   1u IPv6 0x1    0t0      TCP [::1]:3000 (LISTEN)
+            """
+        )
+
+        let snapshot = try ProcessLookup(runner: runner).listeningSnapshot()
+
+        #expect(snapshot.resolution(for: 3000) == .verified(pid: 111))
+        #expect(runner.calls.map(\.0) == ["lsof"])
+    }
+
+    @Test func infoUsesProvidedSnapshotWithoutRunningLsof() throws {
+        let runner = FakeProcessRunner()
+        runner.results["ps -p 111 -o comm="] = ProcessRunResult(
+            exitCode: 0,
+            stdout: "node\n"
+        )
+        let snapshot = LsofParser().parse(
+            """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            node    111 me   1u IPv4 0x1    0t0      TCP 127.0.0.1:3000 (LISTEN)
+            """
+        )
+
+        let info = try ProcessLookup(runner: runner).info(for: 3000, using: snapshot)
+
+        #expect(info?.port == 3000)
+        #expect(info?.identity == VerifiedProcessIdentity(pid: 111, processName: "node"))
+        #expect(runner.calls.map(\.0) == ["ps"])
+    }
+
+    @Test func infoRunsOneLsofThenResolvesVerifiedIdentity() throws {
+        let runner = FakeProcessRunner()
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 0,
+            stdout: """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
+            """
+        )
+        runner.results["ps -p 111 -o comm="] = ProcessRunResult(
+            exitCode: 0,
+            stdout: " node \n"
+        )
+
+        let info = try ProcessLookup(runner: runner).info(for: 3000)
+
+        #expect(info?.pid == 111)
+        #expect(info?.processName == "node")
+        #expect(runner.calls.map(\.0) == ["lsof", "ps"])
+    }
+
+    @Test func infoRejectsAmbiguousListenersForPortWithSortedPIDs() {
+        let snapshot = LsofParser().parse(
+            """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            vite    222 me   1u IPv6 0x2    0t0      TCP [::1]:3000 (LISTEN)
+            node    111 me   1u IPv4 0x1    0t0      TCP 127.0.0.1:3000 (LISTEN)
+            """
+        )
+
         #expect(throws: ProcessLookupError.ambiguousListeners(port: 3000, pids: [111, 222])) {
-            try lookup.info(for: 3000)
+            try ProcessLookup(runner: FakeProcessRunner()).info(for: 3000, using: snapshot)
         }
+    }
+
+    @Test func infoRejectsUntrustedListenersWithStableReasons() {
+        let snapshot = LsofParser().parse(
+            """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            node    111 me   1u IPv4 0x1    0t0      TCP localhost:3000 (LISTEN)
+            """
+        )
+
+        #expect(
+            throws: ProcessLookupError.untrustedListeners(
+                port: 3000,
+                reasons: [.unknownAddress]
+            )
+        ) {
+            try ProcessLookup(runner: FakeProcessRunner()).info(for: 3000, using: snapshot)
+        }
+    }
+
+    @Test func infoReturnsNilForAbsentPortWithoutRunningPS() throws {
+        let runner = FakeProcessRunner()
+        let snapshot = LsofParser().parse(
+            "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME"
+        )
+
+        #expect(try ProcessLookup(runner: runner).info(for: 3000, using: snapshot) == nil)
+        #expect(runner.calls.isEmpty)
     }
 
     @Test func processNameTrimsWhitespace() throws {
         let runner = FakeProcessRunner()
-        runner.results["ps -p 111 -o comm="] = ProcessRunResult(exitCode: 0, stdout: " /usr/local/bin/node \n")
+        runner.results["ps -p 111 -o comm="] = ProcessRunResult(
+            exitCode: 0,
+            stdout: " /usr/local/bin/node \n"
+        )
 
-        let lookup = ProcessLookup(runner: runner)
-        #expect(try lookup.processName(pid: 111) == "/usr/local/bin/node")
+        #expect(try ProcessLookup(runner: runner).processName(pid: 111) == "/usr/local/bin/node")
     }
 
     @Test func processNameTreatsEmptySuccessfulOutputAsMissing() throws {
@@ -60,6 +146,25 @@ node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
         #expect(try ProcessLookup(runner: runner).processName(pid: 222) == nil)
     }
 
+    @Test func infoTurnsMissingProcessNameIntoStableFailure() {
+        let runner = FakeProcessRunner()
+        runner.results["ps -p 111 -o comm="] = ProcessRunResult(
+            exitCode: 1,
+            stdout: "",
+            stderr: "missing"
+        )
+        let snapshot = LsofParser().parse(
+            """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
+            """
+        )
+
+        #expect(throws: ProcessLookupError.processNameUnavailable(pid: 111)) {
+            try ProcessLookup(runner: runner).info(for: 3000, using: snapshot)
+        }
+    }
+
     @Test func processNameTreatsInvalidPIDAsMissingWithoutRunningPS() throws {
         let runner = FakeProcessRunner()
 
@@ -69,19 +174,25 @@ node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
 
     @Test func lsofFailureIsSurfaced() {
         let runner = FakeProcessRunner()
-        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(exitCode: 1, stdout: "", stderr: "denied")
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 1,
+            stdout: "",
+            stderr: "denied"
+        )
 
-        let lookup = ProcessLookup(runner: runner)
         #expect(throws: ProcessLookupError.lsofFailed("denied")) {
-            try lookup.listeningPortPIDMap()
+            try ProcessLookup(runner: runner).listeningSnapshot()
         }
     }
 
     @Test func lsofUsesPinnedTwoSecondTimeout() throws {
         let runner = TimeoutRecordingProcessRunner()
-        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(exitCode: 0, stdout: "")
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 0,
+            stdout: ""
+        )
 
-        _ = try ProcessLookup(runner: runner).listeningPortPIDMap()
+        _ = try ProcessLookup(runner: runner).listeningSnapshot()
 
         #expect(runner.calls == [
             TimeoutProcessCall(
@@ -134,8 +245,9 @@ node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
         runner.error = error
 
         #expect(throws: ProcessLookupError.lsofFailed(error.description)) {
-            try ProcessLookup(runner: runner).listeningPortPIDMap()
+            try ProcessLookup(runner: runner).listeningSnapshot()
         }
+        #expect(runner.calls.map(\.timeout) == [2])
     }
 }
 

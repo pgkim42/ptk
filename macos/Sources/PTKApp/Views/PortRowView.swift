@@ -77,7 +77,7 @@ struct PortRowView: View {
                 .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
                 .help("포트 정보 복사")
 
-                if let target = KillTarget.safe(port: status.port, pid: status.pid, processName: status.processName) {
+                if let target = status.killTarget {
                     Button {
                         onKill(target)
                     } label: {

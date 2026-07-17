@@ -955,6 +955,60 @@ import Testing
         #expect(controller.viewModel.recentPortChanges.map(\.port) == [3000])
     }
 
+    @Test func portChangeHistoryRetainsVerifiedBaselineThroughFailureAndAmbiguity() async throws {
+        let identityA = try #require(VerifiedProcessIdentity(pid: 10, processName: "node"))
+        let identityB = try #require(VerifiedProcessIdentity(pid: 20, processName: "vite"))
+        let verifiedA = PortStatus(port: 3000, isOpen: true, identityState: .verified(identityA))
+        let verifiedB = PortStatus(port: 3000, isOpen: true, identityState: .verified(identityB))
+        let lookupFailure = PortStatus(
+            port: 3000,
+            isOpen: true,
+            identityState: .unavailable(.lookupFailed(message: "lsof failed"))
+        )
+        let ambiguity = PortStatus(
+            port: 3000,
+            isOpen: true,
+            identityState: .unavailable(.ambiguousListeners(pids: [10, 20]))
+        )
+        let scannedStatus = LockedBox(verifiedA)
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        let controller = MenuBarController(
+            settings: settings,
+            portScanWorker: { _ in [scannedStatus.value] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
+        )
+
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+
+        scannedStatus.set(lookupFailure)
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.viewModel.recentPortChanges.isEmpty)
+        #expect(controller.viewModel.menuBarStatusContent.countText == "1")
+
+        scannedStatus.set(verifiedA)
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.viewModel.recentPortChanges.isEmpty)
+
+        scannedStatus.set(ambiguity)
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.viewModel.recentPortChanges.isEmpty)
+        #expect(controller.viewModel.menuBarStatusContent.countText == "1")
+
+        scannedStatus.set(verifiedB)
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+
+        #expect(controller.viewModel.recentPortChanges.count == 1)
+        #expect(controller.viewModel.recentPortChanges.first?.kind == .changed)
+        #expect(controller.viewModel.recentPortChanges.first?.pid == 20)
+        #expect(controller.viewModel.recentPortChanges.first?.processName == "vite")
+    }
+
     @Test func refreshStoresDockerContainerRowsFromServiceSnapshot() async {
         let dockerRows = [
             DockerContainerPortRow(id: "container-api", name: "api", detail: "4000 -> 4000")
@@ -1618,7 +1672,10 @@ import Testing
             message: "lsof failed"
         )))
         let missingPID = try #require(presenter.diagnostic(for: PortStatus(port: 3002, isOpen: true)))
-        let missingProcessName = try #require(presenter.diagnostic(for: PortStatus(port: 3003, isOpen: true, pid: 333)))
+        let missingProcessNameStatus = PortStatus(port: 3003, isOpen: true, pid: 333)
+        let missingProcessName = try #require(presenter.diagnostic(for: missingProcessNameStatus))
+        #expect(missingProcessNameStatus.pid == nil)
+        #expect(missingProcessNameStatus.processName == nil)
 
         #expect(ambiguous.title == "여러 listener가 있어 안전하게 종료할 수 없음")
         #expect(ambiguous.detail == "ambiguous process lookup: port 3000 has PIDs 1, 2")

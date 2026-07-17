@@ -1,5 +1,4 @@
 import Foundation
-import Darwin
 
 public enum ServiceState: Equatable, Sendable {
     case running
@@ -356,33 +355,17 @@ public struct SystemServiceCommandRunner: ServiceCommandRunning {
     }
 }
 
-public protocol ServiceSocketChecking: Sendable {
-    func isListening(host: String, port: UInt16, timeout: TimeInterval) -> Bool
-}
+public protocol ServiceSocketChecking: SocketConnecting {}
 
 public struct TCPServiceSocketChecker: ServiceSocketChecking {
-    public init() {}
+    private let connector: TCPPortConnector
+
+    public init() {
+        connector = TCPPortConnector()
+    }
 
     public func isListening(host: String, port: UInt16, timeout: TimeInterval = 0.2) -> Bool {
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
-        defer { close(fd) }
-
-        var timeoutValue = timeval(tv_sec: Int(timeout), tv_usec: Int32((timeout.truncatingRemainder(dividingBy: 1)) * 1_000_000))
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeoutValue, socklen_t(MemoryLayout<timeval>.size))
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeoutValue, socklen_t(MemoryLayout<timeval>.size))
-
-        var address = sockaddr_in()
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = port.bigEndian
-        guard inet_pton(AF_INET, host, &address.sin_addr) == 1 else { return false }
-
-        return withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                Darwin.connect(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
-            }
-        }
+        connector.isListening(host: host, port: port, timeout: timeout)
     }
 }
 
@@ -492,12 +475,12 @@ public struct ServiceMonitor: Sendable {
         return DockerContainerPortRow.displayRows(for: containers)
     }
 
-    public func databaseStatuses(host: String = "127.0.0.1", group: ServiceGroup = .builtIn) -> [ServiceStatus] {
+    public func databaseStatuses(group: ServiceGroup = .builtIn) -> [ServiceStatus] {
         databaseEndpoints.map { endpoint in
             ServiceStatus(
                 name: endpoint.name,
                 detail: "Port \(endpoint.port)",
-                state: connector.isListening(host: host, port: endpoint.port, timeout: timeout) ? .running : .stopped,
+                state: connector.isListeningOnLocalhost(port: endpoint.port, timeout: timeout) ? .running : .stopped,
                 group: group
             )
         }

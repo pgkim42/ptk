@@ -2,20 +2,21 @@ import Darwin
 
 public struct KillTarget: Equatable, Sendable {
     public let port: UInt16
-    public let pid: Int
-    public let processName: String
+    public let identity: VerifiedProcessIdentity
 
-    public init(port: UInt16, pid: Int, processName: String) {
+    public var pid: Int { identity.pid }
+    public var processName: String { identity.processName }
+
+    init(port: UInt16, identity: VerifiedProcessIdentity) {
         self.port = port
-        self.pid = pid
-        self.processName = processName
+        self.identity = identity
     }
 
-    public static func safe(port: UInt16, pid: Int?, processName: String?) -> KillTarget? {
-        guard let pid, pid > 0, let processName, !processName.isEmpty else {
-            return nil
-        }
-        return KillTarget(port: port, pid: pid, processName: processName)
+    init(port: UInt16, pid: Int, processName: String) {
+        self.init(
+            port: port,
+            identity: VerifiedProcessIdentity(pid: pid, processName: processName)!
+        )
     }
 }
 
@@ -24,6 +25,8 @@ public enum KillError: Error, Equatable, CustomStringConvertible {
     case portNoLongerListening
     case processNameUnavailable
     case resolverFailed(String)
+    case untrustedListener(port: UInt16, reasons: [LsofUntrustedReason])
+    case ambiguousListeners(port: UInt16, pids: [Int])
     case pidChanged(expected: Int, actual: Int)
     case processNameMismatch(expected: String, actual: String)
     case terminationFailed(String)
@@ -38,6 +41,14 @@ public enum KillError: Error, Equatable, CustomStringConvertible {
             return "process name is unavailable; refresh and try again"
         case .resolverFailed(let message):
             return "process lookup failed: \(message)"
+        case .untrustedListener(let port, let reasons):
+            let reasonList = normalizedKillUntrustedReasons(reasons)
+                .map { String(describing: $0) }
+                .joined(separator: ", ")
+            return "untrusted listener for port \(port): \(reasonList); refresh and try again"
+        case .ambiguousListeners(let port, let pids):
+            let pidList = pids.sorted().map(String.init).joined(separator: ", ")
+            return "ambiguous listeners for port \(port): PIDs \(pidList); refresh and try again"
         case .pidChanged(let expected, let actual):
             return "PID changed from \(expected) to \(actual); refresh and try again"
         case .processNameMismatch(let expected, let actual):
@@ -103,6 +114,13 @@ public struct KillService: Sendable {
         let current: PortProcessInfo?
         do {
             current = try resolver.info(for: target.port)
+        } catch ProcessLookupError.untrustedListeners(let port, let reasons) {
+            throw KillError.untrustedListener(
+                port: port,
+                reasons: normalizedKillUntrustedReasons(reasons)
+            )
+        } catch ProcessLookupError.ambiguousListeners(let port, let pids) {
+            throw KillError.ambiguousListeners(port: port, pids: pids.sorted())
         } catch {
             throw KillError.resolverFailed("\(error)")
         }
@@ -110,14 +128,14 @@ public struct KillService: Sendable {
         guard let current else {
             throw KillError.portNoLongerListening
         }
-        guard let currentName = current.processName, !currentName.isEmpty else {
-            throw KillError.processNameUnavailable
-        }
         guard current.pid == target.pid else {
             throw KillError.pidChanged(expected: target.pid, actual: current.pid)
         }
-        guard currentName == target.processName else {
-            throw KillError.processNameMismatch(expected: target.processName, actual: currentName)
+        guard current.processName == target.processName else {
+            throw KillError.processNameMismatch(
+                expected: target.processName,
+                actual: current.processName
+            )
         }
 
         if let message = terminator.terminate(pid: target.pid) {
@@ -140,5 +158,30 @@ public struct KillCoordinator {
         guard confirmer.confirmKill(target: target) else { return .cancelled }
         try service.terminateAfterRevalidation(target: target)
         return .terminated
+    }
+}
+
+private func normalizedKillUntrustedReasons(
+    _ reasons: [LsofUntrustedReason]
+) -> [LsofUntrustedReason] {
+    Array(Set(reasons)).sorted {
+        killUntrustedReasonOrder($0) < killUntrustedReasonOrder($1)
+    }
+}
+
+private func killUntrustedReasonOrder(_ reason: LsofUntrustedReason) -> Int {
+    switch reason {
+    case .remoteOrInterfaceOnly:
+        0
+    case .established:
+        1
+    case .unknownFamily:
+        2
+    case .unknownAddress:
+        3
+    case .malformed:
+        4
+    case .familyAddressConflict:
+        5
     }
 }

@@ -680,7 +680,10 @@ final class MenuBarController: NSObject {
                 recentPortChanges = Array((changes + recentPortChanges).prefix(4))
             }
         }
-        previousStatusesForChanges = scannedStatuses
+        previousStatusesForChanges = PortChange.mergedBaseline(
+            previous: previousStatusesForChanges,
+            current: scannedStatuses
+        )
     }
 
     private func updateViewModel() {

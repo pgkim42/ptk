@@ -21,7 +21,7 @@ public struct PortMenuRow: Equatable, Sendable {
         }
         self.displayText = parts.joined(separator: " · ")
         self.killUnavailableCause = status.killUnavailableCause
-        self.killTarget = KillTarget.safe(port: status.port, pid: status.pid, processName: status.processName)
+        self.killTarget = status.killTarget
         self.canRequestKill = killTarget != nil
     }
 }
