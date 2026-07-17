@@ -78,11 +78,7 @@ import Testing
             pid: 99,
             processName: "vite"
         )
-        let target = try #require(KillTarget.safe(
-            port: status.port,
-            pid: status.pid,
-            processName: status.processName
-        ))
+        let target = try #require(status.killTarget)
 
         #expect(PortRowAccessibility.openLabel(for: status).contains("5173"))
         #expect(PortRowAccessibility.copyURLLabel(for: status).contains("5173"))
