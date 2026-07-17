@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let showPanelOnLaunch: Bool
     private let snapshotURL: URL?
     private let snapshotKind: String
+    private let notificationClient: UserNotificationClient?
 
     override init() {
         let environment = ProcessInfo.processInfo.environment
@@ -24,6 +25,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.snapshotURL = snapshotURL
         self.snapshotKind = snapshotKind
         showPanelOnLaunch = environment["PTK_QA_SHOW_PANEL"] == "1" || snapshotURL != nil
+        let notificationClient: UserNotificationClient?
+        if snapshotURL == nil {
+            let nativeClient = UserNotificationClient()
+            notificationClient = nativeClient
+        } else {
+            notificationClient = nil
+        }
+        self.notificationClient = notificationClient
         let scanner: PortScanner
         let serviceSnapshotWorker: ServiceSnapshotWorker?
         if snapshotKind == "panel-docker" {
@@ -33,11 +42,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             scanner = PortScanner()
             serviceSnapshotWorker = nil
         }
-        menuBarController = MenuBarController(
-            settings: settings,
-            scanner: scanner,
-            serviceSnapshotWorker: serviceSnapshotWorker
-        )
+        if let notificationClient {
+            menuBarController = MenuBarController(
+                settings: settings,
+                scanner: scanner,
+                serviceSnapshotWorker: serviceSnapshotWorker,
+                notificationPermission: notificationClient,
+                notificationDelivery: notificationClient,
+                notificationResponseHandler: notificationClient
+            )
+        } else {
+            let snapshotClient = SnapshotNotificationClient()
+            menuBarController = MenuBarController(
+                settings: settings,
+                scanner: scanner,
+                serviceSnapshotWorker: serviceSnapshotWorker,
+                notificationPermission: snapshotClient,
+                notificationDelivery: snapshotClient
+            )
+        }
         super.init()
     }
 
@@ -89,8 +112,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { [menuBarController] in
+            await menuBarController.refreshNotificationPermissionStatus()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        menuBarController.stop()
+        notificationClient?.stop()
+    }
 }
 
+@MainActor
+private final class SnapshotNotificationClient: PortChangeNotificationPermissionProviding, PortChangeNotificationDelivering {
+    func notificationPermissionStatus() async -> PortChangeNotificationPermissionStatus { .unknown }
+    func requestNotificationPermission() async throws {}
+    func deliver(_ candidate: PortChangeNotificationCandidate) async throws {}
+}
 private struct SnapshotSocketConnector: SocketConnecting {
     let openPorts: Set<UInt16>
 

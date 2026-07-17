@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 public enum AppTheme: String, CaseIterable, Equatable, Sendable {
@@ -25,6 +26,16 @@ public struct PortProfile: Equatable, Identifiable, Codable, Sendable {
         self.expression = expression
     }
 }
+public struct PortChangeNotificationPreference: Equatable, Sendable {
+    public var isEnabled: Bool
+    public var portsExpression: String?
+
+    public init(isEnabled: Bool, portsExpression: String?) {
+        self.isEnabled = isEnabled
+        self.portsExpression = portsExpression
+    }
+}
+
 
 public enum AppSettingsError: Error, Equatable, CustomStringConvertible {
     case emptyProfileName
@@ -52,6 +63,8 @@ public protocol SettingsStore: AnyObject {
     func set(_ value: String, forKey key: String)
     func double(forKey key: String) -> Double?
     func set(_ value: Double, forKey key: String)
+    func bool(forKey key: String) -> Bool?
+    func set(_ value: Bool, forKey key: String)
 }
 
 public final class UserDefaultsSettingsStore: SettingsStore {
@@ -81,6 +94,17 @@ public final class UserDefaultsSettingsStore: SettingsStore {
     public func set(_ value: Double, forKey key: String) {
         defaults.set(value, forKey: key)
     }
+    public func bool(forKey key: String) -> Bool? {
+        guard let value = defaults.object(forKey: key),
+              CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() else {
+            return nil
+        }
+        return value as? Bool
+    }
+
+    public func set(_ value: Bool, forKey key: String) {
+        defaults.set(value, forKey: key)
+    }
 }
 
 public final class InMemorySettingsStore: SettingsStore {
@@ -107,6 +131,17 @@ public final class InMemorySettingsStore: SettingsStore {
     public func set(_ value: Double, forKey key: String) {
         values[key] = value
     }
+    public func bool(forKey key: String) -> Bool? {
+        guard let value = values[key],
+              CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() else {
+            return nil
+        }
+        return value as? Bool
+    }
+
+    public func set(_ value: Bool, forKey key: String) {
+        values[key] = value
+    }
 }
 
 public final class AppSettings {
@@ -116,12 +151,23 @@ public final class AppSettings {
         public static let theme = "theme"
         public static let customPortProfiles = "customPortProfiles"
         public static let customServiceEndpoints = "customServiceEndpoints"
+        public static let portChangeNotificationsEnabled = "portChangeNotificationsEnabled"
+        public static let portChangeNotificationPortsExpression = "portChangeNotificationPortsExpression"
+        public static let portChangeNotificationEligibilityRevision = "portChangeNotificationEligibilityRevision"
     }
 
     private let store: SettingsStore
 
     public init(store: SettingsStore = UserDefaultsSettingsStore()) {
         self.store = store
+    }
+
+    public var portChangeNotificationEligibilityRevision: UInt64 {
+        guard let rawValue = store.string(forKey: Key.portChangeNotificationEligibilityRevision),
+              let revision = UInt64(rawValue) else {
+            return 0
+        }
+        return revision
     }
 
     public var watchedPortsExpression: String {
@@ -215,6 +261,102 @@ public final class AppSettings {
         let encodedEndpoints = try encodedCollection(serviceEndpoints, forKey: Key.customServiceEndpoints)
         store.set(encodedProfiles, forKey: Key.customPortProfiles)
         store.set(encodedEndpoints, forKey: Key.customServiceEndpoints)
+    }
+    /// Replaces a settings draft after all validation succeeds; this is validation-transactional,
+    /// but not crash-atomic across the individual stored keys.
+    public func replaceSettings(
+        watchedPortsExpression: String,
+        refreshInterval: RefreshInterval,
+        theme: AppTheme,
+        profiles: [PortProfile],
+        serviceEndpoints: [DatabaseEndpoint],
+        portChangeNotificationPreference: PortChangeNotificationPreference,
+        parser: PortRangeParser = PortRangeParser()
+    ) throws {
+        _ = try loadCustomPortProfiles()
+        _ = try loadCustomServiceEndpoints()
+        let storedPreference = try loadPortChangeNotificationPreference()
+
+        let normalizedWatchedExpression = watchedPortsExpression
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = try parser.parse(normalizedWatchedExpression)
+
+        var normalizedPreference = portChangeNotificationPreference
+        if normalizedPreference.portsExpression == nil {
+            normalizedPreference.portsExpression = storedPreference.portsExpression
+            if normalizedPreference.isEnabled, normalizedPreference.portsExpression == nil {
+                normalizedPreference.portsExpression = normalizedWatchedExpression
+            }
+        }
+        if normalizedPreference.isEnabled, let expression = normalizedPreference.portsExpression {
+            let normalizedExpression = expression.trimmingCharacters(in: .whitespacesAndNewlines)
+            _ = try parser.parse(normalizedExpression)
+            normalizedPreference.portsExpression = normalizedExpression
+        }
+
+        let encodedProfiles = try encodedCollection(profiles, forKey: Key.customPortProfiles)
+        let encodedEndpoints = try encodedCollection(serviceEndpoints, forKey: Key.customServiceEndpoints)
+
+        let expressionChanged = normalizedPreference.portsExpression != storedPreference.portsExpression
+        let enabledChanged = normalizedPreference.isEnabled != storedPreference.isEnabled
+
+        if storedPreference.isEnabled, !normalizedPreference.isEnabled, enabledChanged {
+            store.set(false, forKey: Key.portChangeNotificationsEnabled)
+        }
+
+        if watchedPortsExpression != normalizedWatchedExpression ||
+            store.string(forKey: Key.watchedPortsExpression) != normalizedWatchedExpression {
+            store.set(normalizedWatchedExpression, forKey: Key.watchedPortsExpression)
+        }
+        if store.double(forKey: Key.refreshInterval) != refreshInterval.rawValue {
+            store.set(refreshInterval.rawValue, forKey: Key.refreshInterval)
+        }
+        if store.string(forKey: Key.theme) != theme.rawValue {
+            store.set(theme.rawValue, forKey: Key.theme)
+        }
+        if store.string(forKey: Key.customPortProfiles) != encodedProfiles {
+            store.set(encodedProfiles, forKey: Key.customPortProfiles)
+        }
+        if store.string(forKey: Key.customServiceEndpoints) != encodedEndpoints {
+            store.set(encodedEndpoints, forKey: Key.customServiceEndpoints)
+        }
+
+        if expressionChanged, let expression = normalizedPreference.portsExpression {
+            store.set(expression, forKey: Key.portChangeNotificationPortsExpression)
+        }
+        if !storedPreference.isEnabled, normalizedPreference.isEnabled, enabledChanged {
+            store.set(true, forKey: Key.portChangeNotificationsEnabled)
+        }
+        if expressionChanged || enabledChanged {
+            store.set(
+                String(portChangeNotificationEligibilityRevision &+ 1),
+                forKey: Key.portChangeNotificationEligibilityRevision
+            )
+        }
+    }
+
+    public func loadPortChangeNotificationPreference() throws -> PortChangeNotificationPreference {
+        let enabled: Bool
+        if store.containsValue(forKey: Key.portChangeNotificationsEnabled) {
+            guard let storedEnabled = store.bool(forKey: Key.portChangeNotificationsEnabled) else {
+                throw AppSettingsError.corruptStoredValue(Key.portChangeNotificationsEnabled)
+            }
+            enabled = storedEnabled
+        } else {
+            enabled = false
+        }
+
+        let expression: String?
+        if store.containsValue(forKey: Key.portChangeNotificationPortsExpression) {
+            guard let storedExpression = store.string(forKey: Key.portChangeNotificationPortsExpression) else {
+                throw AppSettingsError.corruptStoredValue(Key.portChangeNotificationPortsExpression)
+            }
+            expression = storedExpression
+        } else {
+            expression = nil
+        }
+
+        return PortChangeNotificationPreference(isEnabled: enabled, portsExpression: expression)
     }
 
     public func validatedPortProfile(

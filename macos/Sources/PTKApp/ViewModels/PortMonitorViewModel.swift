@@ -166,7 +166,60 @@ struct SettingsDraft: Equatable {
     var theme: AppTheme
     var customPortProfiles: [PortProfile]
     var customServiceEndpoints: [DatabaseEndpoint]
+    var portChangeNotificationPreference: PortChangeNotificationPreference
+    init(
+        portExpression: String,
+        refreshInterval: RefreshInterval,
+        theme: AppTheme,
+        customPortProfiles: [PortProfile],
+        customServiceEndpoints: [DatabaseEndpoint],
+        portChangeNotificationPreference: PortChangeNotificationPreference = .init(isEnabled: false, portsExpression: nil)
+    ) {
+        self.portExpression = portExpression
+        self.refreshInterval = refreshInterval
+        self.theme = theme
+        self.customPortProfiles = customPortProfiles
+        self.customServiceEndpoints = customServiceEndpoints
+        self.portChangeNotificationPreference = portChangeNotificationPreference
+    }
 }
+struct NotificationPermissionUpdate: Equatable, Sendable {
+    let status: PortChangeNotificationPermissionStatus
+    let errorMessage: String?
+}
+
+enum SettingsDraftSaveError: Error {
+    case watchedPorts(Error)
+    case notificationPorts(Error)
+    case storage(Error)
+}
+
+extension SettingsDraft {
+    func applyingNotificationEnablePolicy() -> SettingsDraft {
+        var draft = self
+        draft.portChangeNotificationPreference = Self.notificationPreference(
+            portChangeNotificationPreference,
+            settingEnabled: portChangeNotificationPreference.isEnabled,
+            watchedExpression: portExpression
+        )
+        return draft
+    }
+}
+extension SettingsDraft {
+    static func notificationPreference(
+        _ preference: PortChangeNotificationPreference,
+        settingEnabled enabled: Bool,
+        watchedExpression: String
+    ) -> PortChangeNotificationPreference {
+        var preference = preference
+        preference.isEnabled = enabled
+        if enabled, preference.portsExpression == nil {
+            preference.portsExpression = watchedExpression
+        }
+        return preference
+    }
+}
+
 @MainActor
 final class PortMonitorViewModel: ObservableObject {
     @Published var statuses: [PortStatus] = []
@@ -181,10 +234,20 @@ final class PortMonitorViewModel: ObservableObject {
     @Published var theme: AppTheme
     @Published var customPortProfiles: [PortProfile]
     @Published var customServiceEndpoints: [DatabaseEndpoint]
+    @Published var portChangeNotificationPreference: PortChangeNotificationPreference
+    @Published var notificationPermissionStatus: PortChangeNotificationPermissionStatus = .unknown
+    @Published var notificationPermissionError: String?
 
     @Published var killConfirmationTarget: KillTarget?
     @Published var killErrorMessage: String?
-    @Published var isShowingSettings = false
+    @Published var isShowingSettings = false {
+        didSet {
+            guard isShowingSettings, !oldValue else { return }
+            Task { [weak self] in
+                await self?.refreshNotificationPermissionStatus()
+            }
+        }
+    }
     @Published var isRefreshing = false
     @Published var isTerminatingProcess = false
 
@@ -214,6 +277,10 @@ final class PortMonitorViewModel: ObservableObject {
     private let onIntervalChange: (RefreshInterval) -> Void
     private let onOpenLocalhost: (URL) -> Void
     private let onCopyText: (String) -> Void
+    private let onWatchedPortsCommitted: (Set<UInt16>, Set<UInt16>) -> Void
+    private let onPermissionRefresh: @MainActor () async -> NotificationPermissionUpdate
+    private let onPermissionRequest: @MainActor () async -> NotificationPermissionUpdate
+    private let onOpenNotificationSettings: (URL) -> Bool
     private var killRequestID: UUID?
 
     init(
@@ -225,7 +292,13 @@ final class PortMonitorViewModel: ObservableObject {
         onKillSettled: @escaping () -> Void = {},
         onIntervalChange: @escaping (RefreshInterval) -> Void = { _ in },
         onOpenLocalhost: @escaping (URL) -> Void = { _ in },
-        onCopyText: @escaping (String) -> Void = { _ in }
+        onCopyText: @escaping (String) -> Void = { _ in },
+        onWatchedPortsCommitted: @escaping (Set<UInt16>, Set<UInt16>) -> Void = { _, _ in },
+        onPermissionRefresh: @escaping @MainActor () async -> PortChangeNotificationPermissionStatus = { .unknown },
+        onPermissionRequest: @escaping @MainActor () async -> PortChangeNotificationPermissionStatus = { .unknown },
+        onPermissionRefreshUpdate: (@MainActor () async -> NotificationPermissionUpdate)? = nil,
+        onPermissionRequestUpdate: (@MainActor () async -> NotificationPermissionUpdate)? = nil,
+        onOpenNotificationSettings: @escaping (URL) -> Bool = { _ in false }
     ) {
         var initialSettingsErrors: [String] = []
         let initialProfiles: [PortProfile]
@@ -242,6 +315,13 @@ final class PortMonitorViewModel: ObservableObject {
             initialEndpoints = []
             initialSettingsErrors.append("\(error)")
         }
+        let initialNotificationPreference: PortChangeNotificationPreference
+        do {
+            initialNotificationPreference = try settings.loadPortChangeNotificationPreference()
+        } catch {
+            initialNotificationPreference = PortChangeNotificationPreference(isEnabled: false, portsExpression: nil)
+            initialSettingsErrors.append("\(error)")
+        }
 
         self.settings = settings
         self.parser = parser
@@ -250,6 +330,7 @@ final class PortMonitorViewModel: ObservableObject {
         self.theme = settings.theme
         self.customPortProfiles = initialProfiles
         self.customServiceEndpoints = initialEndpoints
+        self.portChangeNotificationPreference = initialNotificationPreference
         self.onRefresh = onRefresh
         self.onSettingsRefresh = onSettingsRefresh
         self.onKill = onKill
@@ -257,6 +338,14 @@ final class PortMonitorViewModel: ObservableObject {
         self.onIntervalChange = onIntervalChange
         self.onOpenLocalhost = onOpenLocalhost
         self.onCopyText = onCopyText
+        self.onWatchedPortsCommitted = onWatchedPortsCommitted
+        self.onPermissionRefresh = onPermissionRefreshUpdate ?? {
+            NotificationPermissionUpdate(status: await onPermissionRefresh(), errorMessage: nil)
+        }
+        self.onPermissionRequest = onPermissionRequestUpdate ?? {
+            NotificationPermissionUpdate(status: await onPermissionRequest(), errorMessage: nil)
+        }
+        self.onOpenNotificationSettings = onOpenNotificationSettings
         self.settingsErrorMessage = initialSettingsErrors.isEmpty
             ? nil
             : initialSettingsErrors.joined(separator: "\n")
@@ -357,8 +446,11 @@ final class PortMonitorViewModel: ObservableObject {
     }
 
     func saveExpression(_ expression: String) throws {
+        let oldPorts = try parser.parse(portExpression)
+        let newPorts = try parser.parse(expression)
         try settings.updateWatchedPortsExpression(expression, parser: parser)
         portExpression = expression
+        onWatchedPortsCommitted(Set(oldPorts), Set(newPorts))
         onSettingsRefresh()
     }
 
@@ -403,6 +495,7 @@ final class PortMonitorViewModel: ObservableObject {
         settings.refreshInterval = interval
         refreshInterval = interval
         onIntervalChange(interval)
+        onSettingsRefresh()
     }
 
     func saveTheme(_ theme: AppTheme) {
@@ -416,7 +509,8 @@ final class PortMonitorViewModel: ObservableObject {
             refreshInterval: refreshInterval,
             theme: theme,
             customPortProfiles: customPortProfiles,
-            customServiceEndpoints: customServiceEndpoints
+            customServiceEndpoints: customServiceEndpoints,
+            portChangeNotificationPreference: portChangeNotificationPreference
         )
     }
 
@@ -443,24 +537,82 @@ final class PortMonitorViewModel: ObservableObject {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    func saveSettingsDraft(_ draft: SettingsDraft) throws {
-        _ = try parser.parse(draft.portExpression)
-        try settings.replaceCustomCollections(
-            profiles: draft.customPortProfiles,
-            serviceEndpoints: draft.customServiceEndpoints
-        )
-        settings.watchedPortsExpression = draft.portExpression
-        settings.refreshInterval = draft.refreshInterval
-        settings.theme = draft.theme
+    func saveSettingsDraft(_ unnormalizedDraft: SettingsDraft) throws {
+        let draft = unnormalizedDraft.applyingNotificationEnablePolicy()
+        let oldPorts: [UInt16]
+        let newPorts: [UInt16]
+        do {
+            oldPorts = try parser.parse(portExpression)
+            newPorts = try parser.parse(draft.portExpression)
+        } catch {
+            throw SettingsDraftSaveError.watchedPorts(error)
+        }
+        if draft.portChangeNotificationPreference.isEnabled,
+           let expression = draft.portChangeNotificationPreference.portsExpression {
+            do {
+                _ = try parser.parse(expression)
+            } catch {
+                throw SettingsDraftSaveError.notificationPorts(error)
+            }
+        }
+        let savedNotificationPreference: PortChangeNotificationPreference
+        do {
+            try settings.replaceSettings(
+                watchedPortsExpression: draft.portExpression,
+                refreshInterval: draft.refreshInterval,
+                theme: draft.theme,
+                profiles: draft.customPortProfiles,
+                serviceEndpoints: draft.customServiceEndpoints,
+                portChangeNotificationPreference: draft.portChangeNotificationPreference,
+                parser: parser
+            )
+            savedNotificationPreference = try settings.loadPortChangeNotificationPreference()
+        } catch {
+            throw SettingsDraftSaveError.storage(error)
+        }
 
+        let intervalChanged = draft.refreshInterval != refreshInterval
         portExpression = draft.portExpression
         refreshInterval = draft.refreshInterval
         theme = draft.theme
         customPortProfiles = draft.customPortProfiles
         customServiceEndpoints = draft.customServiceEndpoints
+        portChangeNotificationPreference = savedNotificationPreference
         settingsErrorMessage = nil
-        onIntervalChange(draft.refreshInterval)
+        onWatchedPortsCommitted(Set(oldPorts), Set(newPorts))
+        if intervalChanged {
+            onIntervalChange(draft.refreshInterval)
+        }
         onSettingsRefresh()
+        if savedNotificationPreference.isEnabled {
+            Task { [weak self] in
+                await self?.requestNotificationPermissionIfNeeded()
+            }
+        }
+    }
+
+    func refreshNotificationPermissionStatus() async {
+        let update = await onPermissionRefresh()
+        notificationPermissionStatus = update.status
+        notificationPermissionError = update.errorMessage
+    }
+
+    func requestNotificationPermissionIfNeeded() async {
+        let update = await onPermissionRequest()
+        notificationPermissionStatus = update.status
+        notificationPermissionError = update.errorMessage
+    }
+
+    func openNotificationSettings() {
+        var components = URLComponents()
+        components.scheme = "x-apple.systempreferences"
+        components.path = "com.apple.Notifications-Settings.extension"
+        components.queryItems = [URLQueryItem(name: "id", value: "dev.pgkim.ptk")]
+        let appURL = components.url
+        let fallbackURL = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+        if let appURL, onOpenNotificationSettings(appURL) { return }
+        if let fallbackURL, onOpenNotificationSettings(fallbackURL) { return }
+        notificationPermissionError = "알림 설정을 열 수 없습니다."
     }
 
     func openLocalhost(for status: PortStatus) {

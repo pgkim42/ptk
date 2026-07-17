@@ -26,6 +26,68 @@ struct ServiceStatusCompositionPolicy: Equatable, Sendable {
         defaultStatuses + customStatuses
     }
 }
+@MainActor
+private final class SettingsNotificationEligibility: PortChangeNotificationEligibilityProviding {
+    private let settings: AppSettings
+    private let parser: PortRangeParser
+
+    init(settings: AppSettings, parser: PortRangeParser) {
+        self.settings = settings
+        self.parser = parser
+    }
+
+    var notificationsEnabled: Bool {
+        (try? settings.loadPortChangeNotificationPreference().isEnabled) ?? false
+    }
+
+    var selectedNotificationPorts: Set<UInt16> {
+        guard let preference = try? settings.loadPortChangeNotificationPreference(),
+              let expression = preference.portsExpression,
+              let ports = try? parser.parse(expression) else { return [] }
+        return Set(ports)
+    }
+
+    var notificationEligibilityRevision: UInt64 {
+        settings.portChangeNotificationEligibilityRevision
+    }
+}
+
+@MainActor
+private final class SystemNotificationClock: PortChangeNotificationClock {
+    var monotonicTime: TimeInterval { ProcessInfo.processInfo.systemUptime }
+}
+
+@MainActor
+protocol PortChangeNotificationResponseHandling: AnyObject {
+    func attachPanelHandler(_ handler: @escaping @MainActor @Sendable () -> Void)
+    func detachPanelHandler()
+}
+extension UserNotificationClient: PortChangeNotificationResponseHandling {}
+
+private enum UnavailableNotificationError: Error {
+    case unbundledProcess
+}
+
+@MainActor
+private final class UnavailableNotificationClient:
+    PortChangeNotificationPermissionProviding,
+    PortChangeNotificationDelivering
+{
+    func notificationPermissionStatus() async -> PortChangeNotificationPermissionStatus {
+        .unknown
+    }
+
+    func requestNotificationPermission() async throws {
+        throw UnavailableNotificationError.unbundledProcess
+    }
+
+    func deliver(_ candidate: PortChangeNotificationCandidate) async throws {
+        throw UnavailableNotificationError.unbundledProcess
+    }
+}
+
+
+
 
 
 @MainActor
@@ -55,6 +117,11 @@ final class MenuBarController: NSObject {
     private var killTask: Task<String?, Never>?
     private var activeKillID: UUID?
     private var isStopped = false
+    private let notificationCoordinator: PortChangeNotificationCoordinator
+    private weak var notificationResponseHandler: (any PortChangeNotificationResponseHandling)?
+    private let notificationPanelPresentationForTesting: (@MainActor () -> Void)?
+    private let refreshWorkSettlementForTesting: (@MainActor () -> Void)?
+    private var watchedEpoch: UInt64 = 0
     private(set) var lastRefreshTriggerForTesting: RefreshTrigger?
     static let quietRefreshCadence: TimeInterval = 30
 
@@ -78,6 +145,8 @@ final class MenuBarController: NSObject {
 
     private struct ActiveRefresh {
         let request: RefreshRequest
+        let watchedPorts: Set<UInt16>
+        let watchedEpoch: UInt64
         var pendingBranches: Set<RefreshBranch>
         var portTask: Task<Void, Never>?
         var serviceTask: Task<Void, Never>?
@@ -128,7 +197,13 @@ final class MenuBarController: NSObject {
         killService: KillService = KillService(),
         portScanWorker: PortScanWorker? = nil,
         serviceSnapshotWorker: ServiceSnapshotWorker? = nil,
-        killWorker: KillWorker? = nil
+        killWorker: KillWorker? = nil,
+        notificationPermission: (any PortChangeNotificationPermissionProviding)? = nil,
+        notificationDelivery: (any PortChangeNotificationDelivering)? = nil,
+        notificationResponseHandler: (any PortChangeNotificationResponseHandling)? = nil,
+        notificationClock: (any PortChangeNotificationClock)? = nil,
+        notificationPanelPresentationForTesting: (@MainActor () -> Void)? = nil,
+        refreshWorkSettlementForTesting: (@MainActor () -> Void)? = nil
     ) {
         self.settings = settings
         self.parser = parser
@@ -154,6 +229,23 @@ final class MenuBarController: NSObject {
                 dockerContainerRows: defaultSnapshot.dockerContainerRows
             )
         }
+        precondition((notificationPermission == nil) == (notificationDelivery == nil))
+        let unavailableNotificationClient = notificationPermission == nil
+            ? UnavailableNotificationClient()
+            : nil
+        let permission = notificationPermission ?? unavailableNotificationClient!
+        let delivery = notificationDelivery ?? unavailableNotificationClient!
+        let watchedPorts = Set((try? parser.parse(settings.watchedPortsExpression)) ?? [])
+        self.notificationCoordinator = PortChangeNotificationCoordinator(
+            watchedPorts: watchedPorts,
+            permission: permission,
+            delivery: delivery,
+            clock: notificationClock ?? SystemNotificationClock(),
+            eligibility: SettingsNotificationEligibility(settings: settings, parser: parser)
+        )
+        self.notificationResponseHandler = notificationResponseHandler
+        self.notificationPanelPresentationForTesting = notificationPanelPresentationForTesting
+        self.refreshWorkSettlementForTesting = refreshWorkSettlementForTesting
 
         super.init()
         self.refreshScheduler = RefreshScheduler(interval: settings.refreshInterval) { [weak self] trigger, completion in
@@ -191,8 +283,14 @@ final class MenuBarController: NSObject {
         item.button?.action = #selector(togglePopover)
         item.button?.target = self
         configureStatusButton()
-
+        notificationCoordinator.start()
         setupPanel()
+        notificationResponseHandler?.attachPanelHandler { [weak self] in
+            self?.showPanelFromNotification()
+        }
+        Task { [weak notificationCoordinator] in
+            await notificationCoordinator?.refreshPermissionStatus()
+        }
         refreshScheduler?.triggerStartupRefresh()
         scheduleRefreshTimer()
 
@@ -226,10 +324,15 @@ final class MenuBarController: NSObject {
         panel?.orderOut(nil)
         panel = nil
         hostingController = nil
+        notificationResponseHandler?.detachPanelHandler()
+        notificationCoordinator.stop()
         if let statusItem {
             NSStatusBar.system.removeStatusItem(statusItem)
         }
         statusItem = nil
+    }
+    func refreshNotificationPermissionStatus() async {
+        await viewModel.refreshNotificationPermissionStatus()
     }
 
     func writePanelSnapshot(to url: URL) throws {
@@ -301,7 +404,6 @@ final class MenuBarController: NSObject {
             onIntervalChange: { [weak self] interval in
                 self?.refreshScheduler?.changeInterval(to: interval)
                 self?.applyCurrentPanelCadence()
-                self?.refreshScheduler?.triggerSettingsRefresh()
             },
             onOpenLocalhost: { url in
                 NSWorkspace.shared.open(url)
@@ -310,6 +412,34 @@ final class MenuBarController: NSObject {
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
                 pasteboard.setString(text, forType: .string)
+            },
+            onWatchedPortsCommitted: { [weak self] oldPorts, newPorts in
+                guard oldPorts != newPorts else { return }
+                self?.notificationCoordinator.commitWatchedPorts(newPorts)
+                self?.watchedEpoch &+= 1
+            },
+            onPermissionRefreshUpdate: { [weak self] in
+                guard let self else {
+                    return NotificationPermissionUpdate(status: .unknown, errorMessage: nil)
+                }
+                await self.notificationCoordinator.refreshPermissionStatus()
+                return NotificationPermissionUpdate(
+                    status: self.notificationCoordinator.permissionStatus,
+                    errorMessage: self.notificationCoordinator.lastPermissionRequestError.map(String.init(describing:))
+                )
+            },
+            onPermissionRequestUpdate: { [weak self] in
+                guard let self else {
+                    return NotificationPermissionUpdate(status: .unknown, errorMessage: nil)
+                }
+                await self.notificationCoordinator.requestPermissionIfNeeded()
+                return NotificationPermissionUpdate(
+                    status: self.notificationCoordinator.permissionStatus,
+                    errorMessage: self.notificationCoordinator.lastPermissionRequestError.map(String.init(describing:))
+                )
+            },
+            onOpenNotificationSettings: { url in
+                NSWorkspace.shared.open(url)
             }
         )
     }
@@ -403,6 +533,29 @@ final class MenuBarController: NSObject {
         applyNormalCadence(triggerRefresh: true)
         NSApp.activate(ignoringOtherApps: true)
     }
+    func showPanelFromNotification() {
+        guard !isStopped else { return }
+        if let notificationPanelPresentationForTesting {
+            notificationPanelPresentationForTesting()
+            return
+        }
+        guard let panel else { return }
+        if panel.isVisible {
+            panel.makeKeyAndOrderFront(nil)
+        } else if let button = statusItem?.button, button.window != nil {
+            showPanel(relativeTo: button)
+            return
+        } else {
+            let visibleFrame = NSScreen.main?.visibleFrame ?? .zero
+            let size = ContentView.panelSize
+            let x = min(max(visibleFrame.midX - size.width / 2, visibleFrame.minX + 8), visibleFrame.maxX - size.width - 8)
+            let y = min(max(visibleFrame.midY - size.height / 2, visibleFrame.minY + 8), visibleFrame.maxY - size.height - 8)
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
+            panel.makeKeyAndOrderFront(nil)
+        }
+        applyNormalCadence(triggerRefresh: true)
+        NSApp.activate(ignoringOtherApps: true)
+    }
 
     private func scheduleRefreshTimer() {
         refreshTimer?.invalidate()
@@ -487,8 +640,20 @@ final class MenuBarController: NSObject {
     private func startRefresh(_ request: RefreshRequest) {
         guard !isStopped, activeRefreshes.count < 2 else { return }
 
+        let expression = settings.watchedPortsExpression
+        let parsedPorts: [UInt16]?
+        let portConfigurationError: String?
+        do {
+            parsedPorts = try parser.parse(expression)
+            portConfigurationError = nil
+        } catch {
+            parsedPorts = nil
+            portConfigurationError = "포트 설정 오류: \(error)"
+        }
         activeRefreshes[request.generation] = ActiveRefresh(
             request: request,
+            watchedPorts: Set(parsedPorts ?? []),
+            watchedEpoch: watchedEpoch,
             pendingBranches: [.port, .service],
             portTask: nil,
             serviceTask: nil
@@ -509,14 +674,10 @@ final class MenuBarController: NSObject {
         }
         setTask(serviceTask, branch: .service, generation: generation)
 
-        let expression = settings.watchedPortsExpression
-        let ports: [UInt16]
-        do {
-            ports = try parser.parse(expression)
-        } catch {
+        guard let ports = parsedPorts else {
             settlePortBranch(
                 generation: generation,
-                errorMessage: "포트 설정 오류: \(error)"
+                errorMessage: portConfigurationError ?? "포트 설정 오류"
             )
             return
         }
@@ -553,17 +714,27 @@ final class MenuBarController: NSObject {
     }
 
     private func settlePortBranch(generation: Int, statuses: [PortStatus]) {
+        refreshWorkSettlementForTesting?()
         guard canSettle(generation: generation, branch: .port) else { return }
         if canPublish(generation: generation) {
             trackPortChanges(statuses)
             self.statuses = statuses
             portErrorMessage = statuses.compactMap(\.message).first
             updateViewModel()
+            if let refresh = activeRefreshes[generation], refresh.watchedEpoch == watchedEpoch {
+                notificationCoordinator.accept(PortChangeNotificationSnapshot(
+                    generation: UInt64(generation),
+                    watchedEpoch: refresh.watchedEpoch,
+                    watchedPorts: refresh.watchedPorts,
+                    statuses: statuses
+                ))
+            }
         }
         settle(generation: generation, branch: .port)
     }
 
     private func settlePortBranch(generation: Int, errorMessage: String) {
+        refreshWorkSettlementForTesting?()
         guard canSettle(generation: generation, branch: .port) else { return }
         if canPublish(generation: generation) {
             portErrorMessage = errorMessage
@@ -573,6 +744,7 @@ final class MenuBarController: NSObject {
     }
 
     private func settleServiceBranch(generation: Int, snapshot: ServiceSnapshot) {
+        refreshWorkSettlementForTesting?()
         guard canSettle(generation: generation, branch: .service) else { return }
         if canPublish(generation: generation) {
             serviceStatuses = snapshot.statuses
@@ -584,6 +756,7 @@ final class MenuBarController: NSObject {
     }
 
     private func settleServiceBranch(generation: Int, errorMessage: String) {
+        refreshWorkSettlementForTesting?()
         guard canSettle(generation: generation, branch: .service) else { return }
         if canPublish(generation: generation) {
             serviceErrorMessage = errorMessage
