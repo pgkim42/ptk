@@ -39,6 +39,8 @@ assert_contains .github/workflows/ci.yml "swift build"
 assert_contains .github/workflows/ci.yml "PTK_CI_WINDOWSERVER_TEST_SKIP"
 assert_contains .github/workflows/ci.yml "timeout-minutes: 5"
 assert_contains .github/workflows/ci.yml "timeout-minutes: 3"
+assert_contains .github/workflows/ci.yml "PTK_CI_PROCESS_TEST_SKIP"
+assert_contains .github/workflows/ci.yml "PTKCoreTests.ProcessRunnerTests"
 assert_contains .github/workflows/ci.yml "startCanShowPanelImmediatelyForAutomation"
 assert_contains .github/workflows/ci.yml "panelClosedUsesQuietCadenceSlowerThanAllUserIntervals"
 assert_contains .github/workflows/ci.yml "panelReopenRestoresNormalTenSecondCadenceAndRefreshes"
@@ -47,7 +49,7 @@ assert_contains .github/workflows/ci.yml "panelSnapshotCanRenderDockerContainerR
 assert_contains .github/workflows/ci.yml "settingsSnapshotCanBeWrittenForAutomation"
 assert_contains .github/workflows/ci.yml "buttonInteractionSnapshotCanBeWrittenForAutomation"
 assert_contains .github/workflows/ci.yml "renderedDiagnosticRowIsTallerThanRenderedRegularRow"
-assert_contains .github/workflows/ci.yml "swift test --filter PTKCoreTests"
+assert_contains .github/workflows/ci.yml 'swift test --filter PTKCoreTests --skip "$PTK_CI_PROCESS_TEST_SKIP"'
 assert_contains .github/workflows/ci.yml 'swift test --filter PTKAppTests --skip "$PTK_CI_WINDOWSERVER_TEST_SKIP"'
 assert_contains .github/workflows/ci.yml "tests/open-source-readiness.sh"
 assert_contains .github/workflows/ci.yml "tests/release-readiness.sh"
