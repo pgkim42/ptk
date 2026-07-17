@@ -4,20 +4,31 @@ All notable PTK changes are tracked here.
 
 ## [Unreleased]
 
-- Prepare the repository for a first public release workflow.
-- Add release-readiness checks for the changelog, roadmap, and OSS docs.
-- Add GitHub management checks for labels, milestones, issues, topics, and
-  repository description.
+- Continue accessibility, settings-safety, scanner-correctness, and release
+  packaging improvements without weakening process-termination safeguards.
 
-## [0.1.0]
+## [0.5.0]
 
-Planned initial public Swift-only macOS menu bar release.
+Current Swift-only macOS release line.
 
-- Initial public Swift-only macOS menu bar release.
-- Local development port monitoring.
-- Safe process termination with confirmation, revalidation, mismatch blocking,
-  and `SIGTERM` only.
-- Read-only local service status for Docker and common database ports.
-- UserDefaults-backed settings for watched ports, refresh interval, and theme.
-- Public repository basics: CI, 0BSD license, contribution guide, security
-  policy, issue templates, and pull request checklist.
+### Added
+
+- Native menu bar port monitoring with manual refresh, saved profiles, common
+  development-stack presets, and open/copy localhost actions.
+- Read-only service diagnostics for Docker-published ports and common local
+  databases.
+- Compact change summaries, process details, screenshots, and bilingual
+  installation guidance.
+- Unsigned DMG and ZIP packaging plus release and repository readiness checks.
+
+### Changed
+
+- Consolidated the active product path on the Swift package under `macos/`.
+- Improved panel empty, warning, error, and accessibility states.
+- Reduced background scan cadence while the panel is closed.
+
+### Safety
+
+- Process termination remains fail-closed with confirmation, immediate target
+  revalidation, mismatch and ambiguous-listener blocking, and `SIGTERM` only.
+- Process and scan command execution is asynchronous and lifecycle-safe.

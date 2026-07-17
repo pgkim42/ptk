@@ -41,6 +41,9 @@ fail-closed 안전 모델 뒤에 둡니다.
 - 저장소 성격: 개인용 도구이지만 공개 오픈소스 저장소 기준으로 관리
 - 라이선스: `0BSD` (`SPDX-License-Identifier: 0BSD`)
 
+현재 릴리스 버전의 기준은 `CHANGELOG.md`입니다. 위 릴리스 라인과 이 문서의
+배포 파일 이름은 변경 기록의 최신 정식 버전 항목을 따릅니다.
+
 현재 릴리스는 서명되지 않았습니다. PTK는 아직 유료 Developer ID 서명,
 notarization, App Store 배포, Sparkle, 업데이트 서버를 사용하지 않습니다.
 

@@ -3,51 +3,52 @@
 PTK stays small on purpose. The roadmap favors a credible macOS utility and
 maintainable open-source project shape over broad feature count.
 
-## v0.1.0
+The current release version is defined by the latest non-Unreleased entry in
+`CHANGELOG.md`. This file tracks direction and completion state without serving
+as a second version authority.
 
-Goal: ship the first public Swift-only macOS menu bar release.
+## v0.5.0 — current release line
 
-- Release packaging: Unsigned DMG and ZIP release artifacts.
-  (implemented in development)
-- Add a README screenshot or short demo GIF.
-- Prepare release notes with the exact verification commands.
-- Confirm CI covers Swift tests, Swift build, Xcode scheme tests, and repository
-  metadata checks.
-- Keep process termination fail-closed: confirmation, revalidation, mismatch
-  blocking, ambiguous-listener blocking, and `SIGTERM` only.
+Goal: provide a dependable local diagnostic console while keeping the menu bar
+surface compact and the service boundary read-only.
 
-## v0.2.0
+Delivered in this line:
 
-Goal: improve day-to-day local development ergonomics without expanding PTK
-into a service orchestrator.
+- Swift-only native menu bar app with watched-port scanning and manual refresh.
+- Editable watched-port profiles and presets for common development stacks.
+- Safe process termination with confirmation, immediate revalidation, mismatch
+  and ambiguous-listener blocking, and `SIGTERM` only.
+- Quick actions for localhost URLs, process details, and open-port summaries.
+- Read-only Docker published-port and common local database diagnostics.
+- Unsigned DMG and ZIP release artifacts with bilingual installation guidance.
+- CI, release-readiness, and public repository policy checks.
 
-- Manual refresh action in the menu bar panel. (implemented in development)
-- Watched-port presets for common development stacks. (implemented in development)
-- Quick actions to open or copy localhost URLs and open-port summaries.
-  (implemented in development)
-- Better process details for verified listeners, such as copyable PID or
-  command text when safe to show.
-- Small menu bar polish for empty, warning, and error states.
+Current maintenance priorities:
 
-## v0.4.0
+- Keep scanner results correct across IPv4, IPv6, transient command failures,
+  and overlapping refreshes.
+- Keep settings edits transactional and refuse to overwrite unreadable stored
+  data.
+- Keep compact panel controls and diagnostics usable with VoiceOver.
+- Preserve existing release artifacts when packaging validation fails.
 
-Goal: make PTK feel like a small local diagnostic console while keeping the
-menu bar surface compact and read-only service boundary intact.
+## Archived planning milestones
 
-- Priority 1: service diagnostic UX. Keep custom services read-only, grouped
-  separately from built-in checks, and clear about empty/error states; expose
-  Docker host URL copy only for unambiguous single numeric published ports.
-- Priority 2: port-change notification and summary polish for opened, closed,
-  and changed watched ports.
-- Lower v2: stack bundle/profile-service linking remains manual-only; PTK must
-  not switch profiles automatically or infer service lifecycle intent.
-- Launch/distribution polish stays deferred behind the diagnostic-console core.
-- Keep the same non-goals: no unsafe kill overrides, no service lifecycle
-  management, no automatic profile switching, and no new dashboard window.
+The early `v0.1.0`, `v0.2.0`, and `v0.4.0` plans were development milestones.
+Their completed work is consolidated into the `0.5.0` changelog and current
+release line above instead of remaining as open roadmap work.
+
+## Later considerations
+
+- Signed and notarized distribution when the project can support Developer ID
+  requirements.
+- Port-change notification polish that remains local and opt-in.
+- Manual-only stack bundle/profile-service linking without inferred lifecycle
+  actions.
 
 ## Out of scope
 
-These are intentionally not planned for the early roadmap:
+These are intentionally not planned:
 
 - force kill
 - best-effort termination for ambiguous listeners
@@ -55,4 +56,5 @@ These are intentionally not planned for the early roadmap:
 - database start, stop, restart, or migration actions
 - remote host scanning
 - background service orchestration
+- automatic profile switching or inferred service lifecycle actions
 - Rust, Tauri, Node, or a separate CLI runtime in the active app path

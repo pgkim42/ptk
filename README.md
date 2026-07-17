@@ -41,6 +41,10 @@ tool stays trustworthy as it grows.
 - Scope: personal tool, maintained as a public open-source repository
 - License: `0BSD` (`SPDX-License-Identifier: 0BSD`)
 
+`CHANGELOG.md` is the source of truth for the current release version. The
+release line above and artifact names in this README mirror its latest
+non-Unreleased entry.
+
 PTK is distributed as unsigned manual release artifacts for now. It does not
 use paid Developer ID signing, notarization, App Store distribution, Sparkle, or
 an update server yet.
