@@ -1481,7 +1481,7 @@ import Testing
         let viewModel = makeViewModel(settings: AppSettings(store: store))
 
         #expect(viewModel.settingsErrorMessage?.contains(AppSettings.Key.customPortProfiles) == true)
-        #expect(throws: AppSettingsError.corruptStoredValue(AppSettings.Key.customPortProfiles)) {
+        #expect(throws: SettingsDraftSaveError.self) {
             try viewModel.saveSettingsDraft(viewModel.makeSettingsDraft())
         }
         #expect(store.string(forKey: AppSettings.Key.customPortProfiles) == original)
