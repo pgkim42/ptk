@@ -11,18 +11,44 @@ public enum RefreshInterval: Double, CaseIterable, Equatable, Sendable {
     }
 }
 
+public enum RefreshTrigger: Equatable, Sendable {
+    case startup
+    case timer
+    case manual
+    case settings
+    case kill
+}
+
 public enum RefreshTriggerResult: Equatable, Sendable {
     case started
     case skippedInFlight
+    case stopped
 }
 
+@MainActor
 public final class RefreshScheduler {
+    private final class RequestToken {}
+
     public private(set) var interval: RefreshInterval
     public private(set) var scheduleGeneration: Int = 0
-    private var isInFlight = false
-    private let refresh: () -> Void
+    /// `true` while any accepted refresh receipt remains unsettled.
+    ///
+    /// Timer admission is keyed to the newest receipt, so a timer refresh may
+    /// be accepted while this aggregate state remains `true`.
+    public var isInFlight: Bool {
+        !activeTokens.isEmpty
+    }
 
-    public init(interval: RefreshInterval = .defaultValue, refresh: @escaping () -> Void) {
+    private var activeTokens: [ObjectIdentifier: RequestToken] = [:]
+    private var newestToken: RequestToken?
+    private var didTriggerStartup = false
+    private var isStopped = false
+    private let refresh: (RefreshTrigger, @escaping @MainActor () -> Void) -> Void
+
+    public init(
+        interval: RefreshInterval = .defaultValue,
+        refresh: @escaping (RefreshTrigger, @escaping @MainActor () -> Void) -> Void
+    ) {
         self.interval = interval
         self.refresh = refresh
     }
@@ -34,22 +60,61 @@ public final class RefreshScheduler {
     }
 
     @discardableResult
-    public func triggerManualRefresh() -> RefreshTriggerResult {
-        guard !isInFlight else { return .skippedInFlight }
-        isInFlight = true
-        refresh()
-        isInFlight = false
-        return .started
+    public func triggerStartupRefresh() -> RefreshTriggerResult {
+        trigger(.startup)
     }
 
     @discardableResult
-    public func beginRefreshForTesting() -> RefreshTriggerResult {
-        guard !isInFlight else { return .skippedInFlight }
-        isInFlight = true
+    public func triggerTimerRefresh() -> RefreshTriggerResult {
+        trigger(.timer)
+    }
+
+    @discardableResult
+    public func triggerManualRefresh() -> RefreshTriggerResult {
+        trigger(.manual)
+    }
+
+    @discardableResult
+    public func triggerSettingsRefresh() -> RefreshTriggerResult {
+        trigger(.settings)
+    }
+
+    @discardableResult
+    public func triggerKillRefresh() -> RefreshTriggerResult {
+        trigger(.kill)
+    }
+
+    public func stop() {
+        isStopped = true
+        newestToken = nil
+        activeTokens.removeAll()
+    }
+
+    private func trigger(_ trigger: RefreshTrigger) -> RefreshTriggerResult {
+        guard !isStopped else { return .stopped }
+        if trigger == .startup {
+            guard !didTriggerStartup, activeTokens.isEmpty else { return .skippedInFlight }
+            didTriggerStartup = true
+        } else if trigger == .timer {
+            guard newestToken == nil else { return .skippedInFlight }
+        }
+
+        let token = RequestToken()
+        let tokenID = ObjectIdentifier(token)
+        activeTokens[tokenID] = token
+        newestToken = token
+        refresh(trigger) { [weak self, token] in
+            self?.finishRefresh(token)
+        }
         return .started
     }
 
-    public func finishRefreshForTesting() {
-        isInFlight = false
+    private func finishRefresh(_ token: RequestToken) {
+        let tokenID = ObjectIdentifier(token)
+        guard activeTokens[tokenID] === token else { return }
+        activeTokens.removeValue(forKey: tokenID)
+        if newestToken === token {
+            newestToken = nil
+        }
     }
 }

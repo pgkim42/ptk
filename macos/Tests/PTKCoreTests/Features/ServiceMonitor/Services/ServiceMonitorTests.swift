@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Testing
 @testable import PTKCore
 
@@ -35,6 +36,25 @@ import Testing
         let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
 
         #expect(monitor.dockerStatus() == ServiceStatus(name: "Docker", detail: "Daemon timeout", state: .unavailable))
+    }
+
+    @Test func dockerHelperLifecycleFailuresAreCommandUnavailable() {
+        let errors: [ServiceCommandError] = [
+            .launchFailed("launch failed"),
+            .outputLimitExceeded(streams: [.stdout]),
+            .pipeDrainTimedOut
+        ]
+
+        for error in errors {
+            let runner = FakeServiceCommandRunner(error: error)
+            let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
+
+            #expect(monitor.dockerStatus() == ServiceStatus(
+                name: "Docker",
+                detail: "Command unavailable",
+                state: .unavailable
+            ))
+        }
     }
 
     @Test func dockerCommandUsesControlledPath() {
@@ -157,10 +177,99 @@ import Testing
         ])
     }
 
-    @Test func dockerPsFailureDoesNotPolluteDockerDaemonStatus() {
+    @Test func dockerPsTimeoutPublishesDetailsTimeoutWithoutRows() {
+        let runner = FakeServiceCommandRunner(
+            results: [
+                "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n")
+            ],
+            errors: [
+                "docker ps --format {{.Names}}\t{{.Ports}}": ServiceCommandError.timedOut
+            ]
+        )
+        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
+
+        let snapshot = monitor.scanWithDetails()
+
+        #expect(snapshot.statuses.first == ServiceStatus(name: "Docker", detail: "Details timeout", state: .unavailable))
+        #expect(snapshot.dockerContainerRows.isEmpty)
+    }
+
+    @Test func dockerPsLaunchFailureMakesDetailsUnavailableWithoutRows() {
+        let runner = FakeServiceCommandRunner(
+            results: [
+                "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n")
+            ],
+            errors: [
+                "docker ps --format {{.Names}}\t{{.Ports}}": ServiceCommandError.launchFailed("launch failed")
+            ]
+        )
+        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
+
+        let snapshot = monitor.scanWithDetails()
+
+        #expect(snapshot.statuses.first == ServiceStatus(name: "Docker", detail: "Details unavailable", state: .unavailable))
+        #expect(snapshot.dockerContainerRows.isEmpty)
+    }
+
+    @Test func dockerPsOutputOverflowMakesDetailsUnavailableWithoutRows() {
+        let runner = FakeServiceCommandRunner(
+            results: [
+                "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n")
+            ],
+            errors: [
+                "docker ps --format {{.Names}}\t{{.Ports}}": ServiceCommandError.outputLimitExceeded(streams: [.stdout])
+            ]
+        )
+        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
+
+        let snapshot = monitor.scanWithDetails()
+
+        #expect(snapshot.statuses.first == ServiceStatus(name: "Docker", detail: "Details unavailable", state: .unavailable))
+        #expect(snapshot.dockerContainerRows.isEmpty)
+    }
+
+    @Test func dockerPsPostReapDrainFailureMakesDetailsUnavailableWithoutRows() {
+        let runner = FakeServiceCommandRunner(
+            results: [
+                "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n")
+            ],
+            errors: [
+                "docker ps --format {{.Names}}\t{{.Ports}}": ServiceCommandError.pipeDrainTimedOut
+            ]
+        )
+        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
+
+        let snapshot = monitor.scanWithDetails()
+
+        #expect(snapshot.statuses.first == ServiceStatus(name: "Docker", detail: "Details unavailable", state: .unavailable))
+        #expect(snapshot.dockerContainerRows.isEmpty)
+    }
+
+    @Test func dockerPsNonServiceCommandErrorMakesDetailsUnavailableWithoutRows() {
+        let runner = FakeServiceCommandRunner(
+            results: [
+                "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n")
+            ],
+            errors: [
+                "docker ps --format {{.Names}}\t{{.Ports}}": DockerPsSentinelError.failure
+            ]
+        )
+        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
+
+        let snapshot = monitor.scanWithDetails()
+
+        #expect(snapshot.statuses.first == ServiceStatus(name: "Docker", detail: "Details unavailable", state: .unavailable))
+        #expect(snapshot.dockerContainerRows.isEmpty)
+    }
+
+    @Test func dockerPsOrdinaryNonzeroKeepsDockerRunningWithoutParsingRows() {
         let runner = FakeServiceCommandRunner(results: [
             "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n"),
-            "docker ps --format {{.Names}}\t{{.Ports}}": ServiceCommandResult(exitCode: 1, stdout: "", stderr: "boom")
+            "docker ps --format {{.Names}}\t{{.Ports}}": ServiceCommandResult(
+                exitCode: 1,
+                stdout: "must-not-parse\t0.0.0.0:4000->4000/tcp\n",
+                stderr: "boom"
+            )
         ])
         let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
 
@@ -183,40 +292,131 @@ import Testing
         #expect(runner.calls.map(\.arguments) == [["info"]])
     }
 
-    @Test func systemServiceCommandRunnerReturnsPromptlyAfterTimeout() {
+    @Test func systemServiceCommandRunnerReturnsPromptlyAfterTimeoutAndReapsWithOneWaiter() {
+        let process = FakeOwnedHelperProcess(behavior: .ignoresTerm)
+        let runner = SystemServiceCommandRunner(processFactory: { process })
+        let startedAt = Date()
+
+        let error = capturedServiceCommandError {
+            _ = try runner.run(
+                "docker",
+                arguments: ["info"],
+                timeout: 0.01,
+                environmentPath: "/bin:/usr/bin"
+            )
+        }
+
+        #expect(error == .timedOut)
+        #expect(Date().timeIntervalSince(startedAt) < 1)
+        #expect(process.waitUntilExitCallCount == 1)
+        #expect(process.receivedSignals == [SIGTERM, SIGKILL])
+    }
+
+    @Test func systemServiceCommandRunnerKillsTermIgnoringDirectChildPromptly() {
         let runner = SystemServiceCommandRunner()
         let startedAt = Date()
 
         #expect(throws: ServiceCommandError.timedOut) {
             try runner.run(
                 "sh",
-                arguments: ["-c", "trap '' TERM; sleep 5"],
-                timeout: 0.1,
+                arguments: ["-c", "trap '' TERM; while :; do :; done"],
+                timeout: 0.05,
                 environmentPath: "/bin:/usr/bin"
             )
         }
         #expect(Date().timeIntervalSince(startedAt) < 1)
     }
 
-    @Test func systemServiceCommandRunnerReapsTimedOutProcess() {
-        let process = FakeServiceProcess()
+    @Test func systemServiceCommandRunnerMapsLaunchFailure() {
+        let process = FakeOwnedHelperProcess(behavior: .launchFails)
         let runner = SystemServiceCommandRunner(processFactory: { process })
 
-        #expect(throws: ServiceCommandError.timedOut) {
-            try runner.run(
+        let error = capturedServiceCommandError {
+            _ = try runner.run(
                 "docker",
                 arguments: ["info"],
-                timeout: 0.1,
+                timeout: 1,
                 environmentPath: "/bin:/usr/bin"
             )
         }
 
-        #expect(process.didTerminate)
-        let deadline = Date().addingTimeInterval(0.5)
-        while process.waitUntilExitCallCount < 2 && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.01)
+        #expect(error == .launchFailed("launch failed"))
+        #expect(process.waitUntilExitCallCount == 0)
+    }
+
+    @Test func systemServiceCommandRunnerMapsPerStreamOutputOverflow() {
+        let oversized = Data(repeating: 0x61, count: 4 * 1_024 * 1_024 + 1)
+        let process = FakeOwnedHelperProcess(
+            behavior: .exits(exitCode: 0, stdout: oversized, stderr: oversized)
+        )
+        let runner = SystemServiceCommandRunner(processFactory: { process })
+
+        let error = capturedServiceCommandError {
+            _ = try runner.run(
+                "docker",
+                arguments: ["info"],
+                timeout: 2,
+                environmentPath: "/bin:/usr/bin"
+            )
         }
-        #expect(process.waitUntilExitCallCount == 2)
+
+        #expect(error == .outputLimitExceeded(streams: [.stdout, .stderr]))
+        #expect(process.waitUntilExitCallCount == 1)
+    }
+
+    @Test func systemServiceCommandRunnerMapsPostExitPipeDrainTimeout() {
+        let process = FakeOwnedHelperProcess(behavior: .holdsStdoutOpen)
+        let runner = SystemServiceCommandRunner(processFactory: { process })
+
+        let error = capturedServiceCommandError {
+            _ = try runner.run(
+                "docker",
+                arguments: ["info"],
+                timeout: 1,
+                environmentPath: "/bin:/usr/bin"
+            )
+        }
+        process.releaseHeldPipes()
+
+        #expect(error == .pipeDrainTimedOut)
+        #expect(process.waitUntilExitCallCount == 1)
+    }
+
+    @Test func systemServiceCommandRunnerExactlyReplacesHostileInheritedPathAndReturnsCapturedResult() throws {
+        let process = FakeOwnedHelperProcess(
+            behavior: .exits(
+                exitCode: 7,
+                stdout: Data("output".utf8),
+                stderr: Data("warning".utf8)
+            )
+        )
+        let hostilePath = "/hostile/bin:$(touch /tmp/ptk-must-not-run)"
+        let inheritedEnvironment = [
+            "PATH": hostilePath,
+            "PTK_PRESERVED": "yes"
+        ]
+        let runner = SystemServiceCommandRunner(
+            processFactory: { process },
+            environment: inheritedEnvironment
+        )
+        let controlledPath = "/controlled/bin:/usr/bin"
+
+        let result = try runner.run(
+            "docker",
+            arguments: ["info"],
+            timeout: 1,
+            environmentPath: controlledPath
+        )
+
+        #expect(process.executableURL?.path == "/usr/bin/env")
+        #expect(process.arguments == ["docker", "info"])
+        #expect(process.environment == [
+            "PATH": controlledPath,
+            "PTK_PRESERVED": "yes"
+        ])
+        #expect(process.environment?["PATH"] == controlledPath)
+        #expect(process.environment?["PATH"]?.contains(hostilePath) == false)
+        #expect(result == ServiceCommandResult(exitCode: 7, stdout: "output", stderr: "warning"))
     }
 
     @Test func databaseStatusesReflectKnownPorts() {
@@ -264,22 +464,71 @@ import Testing
             ServiceStatus(name: "RabbitMQ", detail: "Port 5672", state: .running, group: .custom)
         ])
     }
+
+    @Test func ipv6OnlyDatabaseListenerIsRunning() {
+        let connector = RecordingServiceSocketChecker(
+            openHostsByPort: [5432: ["::1"]]
+        )
+        let monitor = ServiceMonitor(
+            runner: FakeServiceCommandRunner(),
+            connector: connector,
+            databaseEndpoints: [DatabaseEndpoint(name: "PostgreSQL", port: 5432)],
+            timeout: 1
+        )
+
+        #expect(monitor.databaseStatuses() == [
+            ServiceStatus(name: "PostgreSQL", detail: "Port 5432", state: .running)
+        ])
+        #expect(connector.calls.map(\.host) == ["127.0.0.1", "::1"])
+    }
+
+    @Test func serviceSocketCheckerUsesSharedAbsoluteProbeBudget() {
+        let clock = ServiceProbeClock()
+        let connector = RecordingServiceSocketChecker(
+            openHostsByPort: [5432: ["::1"]],
+            elapsedByHost: ["127.0.0.1": 0.125, "::1": 0.25],
+            clock: clock
+        )
+
+        let isOpen = connector.isListeningOnLocalhost(
+            port: 5432,
+            timeout: 1,
+            now: { clock.now }
+        )
+        #expect(isOpen)
+        #expect(connector.calls == [
+            ServiceSocketProbeCall(host: "127.0.0.1", port: 5432, timeout: 0.5),
+            ServiceSocketProbeCall(host: "::1", port: 5432, timeout: 0.875)
+        ])
+        #expect(clock.now == 0.375)
+    }
 }
 
+private enum DockerPsSentinelError: Error {
+    case failure
+}
 private final class FakeServiceCommandRunner: ServiceCommandRunning, @unchecked Sendable {
     var results: [String: ServiceCommandResult]
+    var errors: [String: Error]
     var error: Error?
     var calls: [ServiceCommandCall] = []
 
-    init(results: [String: ServiceCommandResult] = [:], error: Error? = nil) {
+    init(
+        results: [String: ServiceCommandResult] = [:],
+        errors: [String: Error] = [:],
+        error: Error? = nil
+    ) {
         self.results = results
+        self.errors = errors
         self.error = error
     }
 
     func run(_ executable: String, arguments: [String], timeout: TimeInterval, environmentPath: String) throws -> ServiceCommandResult {
         calls.append(ServiceCommandCall(executable: executable, arguments: arguments, timeout: timeout, environmentPath: environmentPath))
+        let key = ([executable] + arguments).joined(separator: " ")
+        if let commandError = errors[key] { throw commandError }
         if let error { throw error }
-        return results[([executable] + arguments).joined(separator: " ")] ?? ServiceCommandResult(exitCode: 1, stdout: "", stderr: "missing fake result")
+        return results[key] ?? ServiceCommandResult(exitCode: 1, stdout: "", stderr: "missing fake result")
     }
 }
 
@@ -298,26 +547,187 @@ private struct FakeServiceSocketChecker: ServiceSocketChecking {
     }
 }
 
-private final class FakeServiceProcess: ServiceProcess, @unchecked Sendable {
+private struct ServiceSocketProbeCall: Equatable {
+    let host: String
+    let port: UInt16
+    let timeout: TimeInterval
+}
+
+private final class ServiceProbeClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedNow: TimeInterval = 0
+
+    var now: TimeInterval {
+        lock.withLock { storedNow }
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.withLock {
+            storedNow += interval
+        }
+    }
+}
+
+private final class RecordingServiceSocketChecker: ServiceSocketChecking, @unchecked Sendable {
+    private let lock = NSLock()
+    private let openHostsByPort: [UInt16: Set<String>]
+    private let elapsedByHost: [String: TimeInterval]
+    private let clock: ServiceProbeClock?
+    private var storedCalls: [ServiceSocketProbeCall] = []
+
+    init(
+        openHostsByPort: [UInt16: Set<String>] = [:],
+        elapsedByHost: [String: TimeInterval] = [:],
+        clock: ServiceProbeClock? = nil
+    ) {
+        self.openHostsByPort = openHostsByPort
+        self.elapsedByHost = elapsedByHost
+        self.clock = clock
+    }
+
+    var calls: [ServiceSocketProbeCall] {
+        lock.withLock { storedCalls }
+    }
+
+    func isListening(host: String, port: UInt16, timeout: TimeInterval) -> Bool {
+        lock.withLock {
+            storedCalls.append(
+                ServiceSocketProbeCall(host: host, port: port, timeout: timeout)
+            )
+        }
+
+        let elapsed = elapsedByHost[host] ?? 0
+        clock?.advance(by: min(elapsed, max(timeout, 0)))
+        return openHostsByPort[port]?.contains(host) == true && elapsed <= timeout
+    }
+}
+
+private final class FakeOwnedHelperProcess: OwnedHelperProcess, @unchecked Sendable {
+    enum Behavior {
+        case exits(exitCode: Int32, stdout: Data, stderr: Data)
+        case launchFails
+        case ignoresTerm
+        case holdsStdoutOpen
+    }
+
     var executableURL: URL?
     var arguments: [String]?
     var environment: [String: String]?
     var standardOutput: Any?
     var standardError: Any?
-    var terminationStatus: Int32 = 0
-    var didTerminate = false
-    var waitUntilExitCallCount = 0
 
-    func run() throws {}
+    private let behavior: Behavior
+    private let condition = NSCondition()
+    private var heldOutput: FileHandle?
+    private var killed = false
+    private var signals: [Int32] = []
+    private var waitCallCount = 0
 
-    func waitUntilExit() {
-        waitUntilExitCallCount += 1
-        if !didTerminate {
-            Thread.sleep(forTimeInterval: 1)
+    init(behavior: Behavior) {
+        self.behavior = behavior
+    }
+
+    var terminationStatus: Int32 {
+        if case .exits(let exitCode, _, _) = behavior {
+            return exitCode
+        }
+        return 0
+    }
+
+    let processIdentifier: Int32 = 42
+
+    var waitUntilExitCallCount: Int {
+        condition.lock()
+        defer { condition.unlock() }
+        return waitCallCount
+    }
+
+    var receivedSignals: [Int32] {
+        condition.lock()
+        defer { condition.unlock() }
+        return signals
+    }
+
+    func run() throws {
+        switch behavior {
+        case .exits(_, let stdout, let stderr):
+            write(stdout, to: standardOutput)
+            write(stderr, to: standardError)
+        case .launchFails:
+            throw NSError(
+                domain: "FakeOwnedHelperProcess",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "launch failed"]
+            )
+        case .ignoresTerm:
+            break
+        case .holdsStdoutOpen:
+            guard
+                let pipe = standardOutput as? Pipe,
+                let duplicate = duplicateFileHandle(pipe.fileHandleForWriting)
+            else {
+                throw NSError(
+                    domain: "FakeOwnedHelperProcess",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "failed to retain output pipe"]
+                )
+            }
+            heldOutput = duplicate
         }
     }
 
-    func terminate() {
-        didTerminate = true
+    func waitUntilExit() {
+        condition.lock()
+        waitCallCount += 1
+        while behavior.isTermIgnoring, !killed {
+            condition.wait()
+        }
+        condition.unlock()
+    }
+
+    func sendSignal(_ signal: Int32) {
+        condition.lock()
+        signals.append(signal)
+        if signal == SIGKILL {
+            killed = true
+            condition.broadcast()
+        }
+        condition.unlock()
+    }
+
+    func releaseHeldPipes() {
+        heldOutput?.closeFile()
+        heldOutput = nil
+    }
+
+    private func write(_ data: Data, to destination: Any?) {
+        guard !data.isEmpty, let pipe = destination as? Pipe else { return }
+        pipe.fileHandleForWriting.write(data)
+    }
+
+    private func duplicateFileHandle(_ fileHandle: FileHandle) -> FileHandle? {
+        let descriptor = dup(fileHandle.fileDescriptor)
+        guard descriptor >= 0 else { return nil }
+        return FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    }
+}
+
+private extension FakeOwnedHelperProcess.Behavior {
+    var isTermIgnoring: Bool {
+        if case .ignoresTerm = self {
+            return true
+        }
+        return false
+    }
+}
+
+private func capturedServiceCommandError(_ operation: () throws -> Void) -> ServiceCommandError? {
+    do {
+        try operation()
+        return nil
+    } catch let error as ServiceCommandError {
+        return error
+    } catch {
+        return nil
     }
 }

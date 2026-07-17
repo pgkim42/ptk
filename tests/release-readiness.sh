@@ -25,15 +25,18 @@ assert_contains() {
 
 assert_file CHANGELOG.md
 assert_contains CHANGELOG.md "## [Unreleased]"
-assert_contains CHANGELOG.md "## [0.1.0]"
-assert_contains CHANGELOG.md "Initial public Swift-only macOS menu bar release"
+assert_contains CHANGELOG.md "## [0.5.0]"
+assert_contains CHANGELOG.md "Current Swift-only macOS release line"
+assert_contains CHANGELOG.md "SIGTERM"
+assert_contains CHANGELOG.md "cd macos && swift test"
+assert_contains CHANGELOG.md "xcodebuild -scheme PTK"
+assert_contains CHANGELOG.md "### Known limitations"
 
 assert_file docs/roadmap.md
-assert_contains docs/roadmap.md "## v0.1.0"
-assert_contains docs/roadmap.md "## v0.2.0"
-assert_contains docs/roadmap.md "Release packaging"
+assert_contains docs/roadmap.md "## v0.5.0 — current release line"
+assert_contains docs/roadmap.md "## Archived planning milestones"
 assert_contains docs/roadmap.md "Unsigned DMG and ZIP release artifacts"
-assert_contains docs/roadmap.md "Manual refresh"
+assert_contains docs/roadmap.md "manual refresh"
 assert_contains docs/roadmap.md "Out of scope"
 assert_contains docs/roadmap.md "force kill"
 

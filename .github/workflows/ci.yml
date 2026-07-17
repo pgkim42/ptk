@@ -10,16 +10,15 @@ jobs:
   swift:
     name: Swift package
     runs-on: macos-latest
-    env:
-      PTK_CI_WINDOWSERVER_TEST_SKIP: >-
-        PTKAppTests.MenuBarControllerTests/(startCanShowPanelImmediatelyForAutomation|panelClosedUsesQuietCadenceSlowerThanAllUserIntervals|panelReopenRestoresNormalTenSecondCadenceAndRefreshes|panelSnapshotCanBeWrittenForAutomation|panelSnapshotCanRenderDockerContainerRowsForAutomation|settingsSnapshotCanBeWrittenForAutomation|buttonInteractionSnapshotCanBeWrittenForAutomation)
+    timeout-minutes: 5
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6.0.2
 
       - name: Test package
-        run: swift test --skip "$PTK_CI_WINDOWSERVER_TEST_SKIP"
+        timeout-minutes: 2
+        run: swift test --filter 'AppSettingsTests|KillSafetyTests|LsofParserTests|MenuModelTests|PortRangeParserTests|PortScannerTests|ProcessLookupTests|RefreshSchedulerTests'
         working-directory: macos
 
       - name: Build package

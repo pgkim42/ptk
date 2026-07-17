@@ -3,6 +3,7 @@ import SwiftUI
 struct PanelIconButton: View {
     let systemName: String
     let help: String
+    let accessibilityHint: String
     let action: () -> Void
 
     var body: some View {
@@ -12,6 +13,8 @@ struct PanelIconButton: View {
         }
         .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 24))
         .help(help)
+        .accessibilityLabel(help)
+        .accessibilityHint(accessibilityHint)
     }
 }
 

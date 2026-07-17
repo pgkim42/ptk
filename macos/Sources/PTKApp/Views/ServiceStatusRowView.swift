@@ -36,6 +36,8 @@ struct ServiceStatusRowView: View {
         .padding(.horizontal, 9)
         .frame(height: 29)
         .background(Color.clear)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(ServiceRowAccessibility.statusLabel(for: status))
     }
 
     private var indicatorColor: Color {
@@ -110,6 +112,8 @@ struct DockerContainerPortRowView: View {
                 }
                 .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 20))
                 .help("Docker URL 복사: \(candidate.urlString)")
+                .accessibilityLabel(ServiceRowAccessibility.copyLabel(for: row, url: candidate.urlString))
+                .accessibilityHint(ServiceRowAccessibility.copyHint(for: candidate.urlString))
             }
             Spacer(minLength: 0)
         }
@@ -117,6 +121,8 @@ struct DockerContainerPortRowView: View {
         .frame(height: 24)
         .background(PTKTheme.card.opacity(0.28))
         .help(row.isSummary ? row.detail : "\(row.name) \(row.detail)")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(ServiceRowAccessibility.containerLabel(for: row))
     }
 }
 
@@ -142,5 +148,23 @@ struct ServiceStatusEmptyRowView: View {
         .padding(.vertical, 7)
         .background(PTKTheme.card.opacity(0.18))
         .help(message)
+    }
+}
+
+enum ServiceRowAccessibility {
+    static func statusLabel(for status: ServiceStatus) -> String {
+        "\(status.name) 서비스, \(status.detail), 상태 \(status.state.label)"
+    }
+
+    static func copyLabel(for row: DockerContainerPortRow, url: String) -> String {
+        "Docker 서비스 \(row.name) URL 복사, \(url)"
+    }
+
+    static func copyHint(for url: String) -> String {
+        "\(url)을 클립보드에 복사합니다."
+    }
+
+    static func containerLabel(for row: DockerContainerPortRow) -> String {
+        row.isSummary ? row.detail : "Docker 서비스 \(row.name), \(row.detail)"
     }
 }

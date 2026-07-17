@@ -6,41 +6,905 @@ import Testing
 
 @MainActor
 @Suite(.serialized) struct MenuBarControllerTests {
-    @Test func refreshStartsServiceStatusLoadWithoutWaitingForCompletion() {
+    @Test func refreshRunsPortAndServiceWorkersAndPublishesAsynchronously() async {
         let settings = AppSettings(store: InMemorySettingsStore())
-        settings.watchedPortsExpression = "3000"
-        var serviceCompletions: [@MainActor ([ServiceStatus]) -> Void] = []
+        settings.watchedPortsExpression = "3000,3001"
         let controller = MenuBarController(
             settings: settings,
-            scanner: PortScanner(
-                connector: FakeSocketConnector(openPorts: []),
-                lookup: ProcessLookup(runner: FakeProcessRunner())
-            ),
-            serviceStatusLoader: { completion in
-                serviceCompletions.append(completion)
+            portScanWorker: { ports in
+                ports.map { PortStatus(port: $0, isOpen: true) }
+            },
+            serviceSnapshotWorker: { _ in
+                ServiceSnapshot(statuses: [
+                    ServiceStatus(name: "Docker", detail: "Daemon", state: .running)
+                ])
             }
         )
 
         controller.performRefresh()
 
-        #expect(serviceCompletions.count == 1)
+        #expect(controller.viewModel.isRefreshing)
+        #expect(await eventually {
+            !controller.viewModel.isRefreshing
+        })
+        #expect(controller.viewModel.openPorts.map(\.port) == [3000, 3001])
+        #expect(controller.viewModel.serviceStatuses.map(\.name) == ["Docker"])
     }
 
-    @Test func refreshStillLoadsServiceStatusesWhenWatchedPortsAreInvalid() {
+    @Test func parserFailureSettlesOnlyPortBranchAndServiceStillPublishes() async {
         let settings = AppSettings(store: InMemorySettingsStore())
-        settings.watchedPortsExpression = "nope"
-        var serviceLoadCount = 0
+        settings.watchedPortsExpression = "not-a-port"
+        let serviceGate = BlockingGate()
         let controller = MenuBarController(
             settings: settings,
-            serviceStatusLoader: { completion in
-                serviceLoadCount += 1
-                completion([ServiceStatus(name: "Docker", detail: "Daemon", state: .running)])
+            portScanWorker: { _ in
+                Issue.record("Port worker must not run after parser failure")
+                return []
+            },
+            serviceSnapshotWorker: { _ in
+                serviceGate.wait()
+                return ServiceSnapshot(statuses: [
+                    ServiceStatus(name: "Redis", detail: "Port 6379", state: .running)
+                ])
             }
         )
 
         controller.performRefresh()
 
-        #expect(serviceLoadCount == 1)
+        #expect(controller.viewModel.isRefreshing)
+        #expect(controller.viewModel.errorMessage?.hasPrefix("포트 설정 오류:") == true)
+        #expect(await eventually { serviceGate.hasWaiter })
+        serviceGate.open()
+        #expect(await eventually {
+            !controller.viewModel.isRefreshing
+        })
+        #expect(controller.viewModel.serviceStatuses.map(\.name) == ["Redis"])
+        #expect(controller.viewModel.errorMessage?.hasPrefix("포트 설정 오류:") == true)
+    }
+
+    @Test func refreshSnapshotsSettingsAndCustomEndpointsBeforeWorkersRun() async throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        try settings.saveCustomServiceEndpoint(name: "RabbitMQ", port: 5672)
+        let portGate = BlockingGate()
+        let serviceGate = BlockingGate()
+        let receivedPorts = LockedBox<[UInt16]>([])
+        let receivedEndpoints = LockedBox<[DatabaseEndpoint]>([])
+        let controller = MenuBarController(
+            settings: settings,
+            portScanWorker: { ports in
+                portGate.wait()
+                receivedPorts.set(ports)
+                return []
+            },
+            serviceSnapshotWorker: { endpoints in
+                serviceGate.wait()
+                receivedEndpoints.set(endpoints)
+                return ServiceSnapshot(statuses: [])
+            }
+        )
+
+        controller.performRefresh()
+        #expect(await eventually { portGate.hasWaiter && serviceGate.hasWaiter })
+
+        settings.watchedPortsExpression = "4000"
+        try settings.saveCustomServiceEndpoint(name: "NATS", port: 4222)
+        portGate.open()
+        serviceGate.open()
+
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(receivedPorts.value == [3000])
+        #expect(receivedEndpoints.value.map(\.name) == ["RabbitMQ"])
+    }
+
+    @Test func refreshKeepsProgressUntilBothBranchesSettle() async {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        let portGate = BlockingGate()
+        let serviceGate = BlockingGate()
+        let controller = MenuBarController(
+            settings: settings,
+            portScanWorker: { _ in
+                portGate.wait()
+                return [PortStatus(port: 3000, isOpen: true)]
+            },
+            serviceSnapshotWorker: { _ in
+                serviceGate.wait()
+                return ServiceSnapshot(statuses: [
+                    ServiceStatus(name: "Docker", detail: "Daemon", state: .running)
+                ])
+            }
+        )
+
+        controller.performRefresh()
+        #expect(await eventually { portGate.hasWaiter && serviceGate.hasWaiter })
+        #expect(controller.viewModel.isRefreshing)
+
+        portGate.open()
+        #expect(await eventually { controller.viewModel.statuses.count == 1 })
+        #expect(controller.viewModel.isRefreshing)
+
+        serviceGate.open()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+    }
+
+    @Test func pendingRequestImmediatelyInvalidatesNonemptyStaleResultsAndOnlyLatestReplacementStarts() async {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        let portGate = BlockingGate()
+        let serviceGate = BlockingGate()
+        let portCalls = LockedBox(0)
+        let serviceCalls = LockedBox(0)
+        let controller = MenuBarController(
+            settings: settings,
+            portScanWorker: { _ in
+                portCalls.withValue { $0 += 1 }
+                switch portCalls.value {
+                case 1:
+                    return [PortStatus(port: 3000, isOpen: true, pid: 100, processName: "initial")]
+                case 2:
+                    return [PortStatus(port: 3000, isOpen: true, pid: 200, processName: "current")]
+                case 3:
+                    throw TestFailure("accepted port error")
+                default:
+                    portGate.wait()
+                    return []
+                }
+            },
+            serviceSnapshotWorker: { _ in
+                serviceCalls.withValue { $0 += 1 }
+                switch serviceCalls.value {
+                case 1, 2:
+                    return ServiceSnapshot(
+                        statuses: [
+                            ServiceStatus(name: "Current", detail: "Ready", state: .running)
+                        ],
+                        dockerContainerRows: [
+                            DockerContainerPortRow(
+                                id: "current",
+                                name: "current",
+                                detail: "127.0.0.1:3000 -> 3000"
+                            )
+                        ]
+                    )
+                case 3:
+                    throw TestFailure("accepted service error")
+                default:
+                    serviceGate.wait()
+                    return ServiceSnapshot(statuses: [])
+                }
+            }
+        )
+        defer {
+            controller.stop()
+            portGate.open()
+            serviceGate.open()
+        }
+
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(!controller.viewModel.recentPortChanges.isEmpty)
+
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.viewModel.errorMessage?.contains("accepted port error") == true)
+        #expect(controller.viewModel.errorMessage?.contains("accepted service error") == true)
+
+        let acceptedStatuses = controller.viewModel.statuses
+        let acceptedError = controller.viewModel.errorMessage
+        let acceptedHistory = controller.viewModel.recentPortChanges
+        let acceptedMenuContent = controller.viewModel.menuBarStatusContent
+        let acceptedServiceStatuses = controller.viewModel.serviceStatuses
+        let acceptedDockerRows = controller.viewModel.dockerContainerRows
+        #expect(!acceptedStatuses.isEmpty)
+        #expect(acceptedError != nil)
+        #expect(!acceptedHistory.isEmpty)
+        #expect(acceptedMenuContent.countText == "1")
+        #expect(!acceptedServiceStatuses.isEmpty)
+        #expect(!acceptedDockerRows.isEmpty)
+
+        controller.performRefresh()
+        controller.performRefresh()
+        #expect(await eventually { portCalls.value == 5 && serviceCalls.value == 5 })
+        #expect(controller.activeGenerationsForTesting == [4, 5])
+
+        controller.fireTimerForTesting()
+        #expect(controller.nextGenerationForTesting == 5)
+        #expect(portCalls.value == 5)
+        #expect(serviceCalls.value == 5)
+
+        controller.performRefresh()
+        #expect(controller.pendingGenerationForTesting == 6)
+        controller.performRefresh()
+        #expect(controller.nextGenerationForTesting == 7)
+        #expect(controller.activeGenerationsForTesting == [4, 5])
+        #expect(controller.pendingGenerationForTesting == 7)
+        let acceptedNewestProgress = controller.viewModel.isRefreshing
+        #expect(acceptedNewestProgress)
+
+        controller.settlePortForTesting(
+            generation: 4,
+            statuses: [
+                PortStatus(
+                    port: 4000,
+                    isOpen: true,
+                    pid: 400,
+                    processName: "stale",
+                    message: "stale port success message"
+                )
+            ]
+        )
+        controller.settlePortErrorForTesting(
+            generation: 4,
+            errorMessage: "stale port error"
+        )
+        controller.settleServiceForTesting(
+            generation: 5,
+            snapshot: ServiceSnapshot(
+                statuses: [
+                    ServiceStatus(name: "Stale", detail: "Old", state: .stopped)
+                ],
+                dockerContainerRows: [
+                    DockerContainerPortRow(id: "stale", name: "stale", detail: "4000 -> 4000")
+                ]
+            )
+        )
+        controller.settleServiceErrorForTesting(
+            generation: 5,
+            errorMessage: "stale service error"
+        )
+
+        #expect(controller.activeGenerationsForTesting == [4, 5])
+        #expect(controller.pendingGenerationForTesting == 7)
+        #expect(portCalls.value == 5)
+        #expect(serviceCalls.value == 5)
+        #expect(controller.viewModel.statuses == acceptedStatuses)
+        #expect(controller.viewModel.errorMessage == acceptedError)
+        #expect(controller.viewModel.recentPortChanges == acceptedHistory)
+        #expect(controller.viewModel.menuBarStatusContent == acceptedMenuContent)
+        #expect(controller.viewModel.serviceStatuses == acceptedServiceStatuses)
+        #expect(controller.viewModel.dockerContainerRows == acceptedDockerRows)
+        #expect(controller.viewModel.isRefreshing == acceptedNewestProgress)
+
+        controller.settleServiceErrorForTesting(
+            generation: 4,
+            errorMessage: "stale settlement error"
+        )
+
+        #expect(await eventually { portCalls.value == 6 && serviceCalls.value == 6 })
+        #expect(controller.activeGenerationsForTesting == [5, 7])
+        #expect(controller.pendingGenerationForTesting == nil)
+        #expect(controller.nextGenerationForTesting == 7)
+        #expect(controller.viewModel.statuses == acceptedStatuses)
+        #expect(controller.viewModel.errorMessage == acceptedError)
+        #expect(controller.viewModel.recentPortChanges == acceptedHistory)
+        #expect(controller.viewModel.menuBarStatusContent == acceptedMenuContent)
+        #expect(controller.viewModel.serviceStatuses == acceptedServiceStatuses)
+        #expect(controller.viewModel.dockerContainerRows == acceptedDockerRows)
+        #expect(controller.viewModel.isRefreshing == acceptedNewestProgress)
+    }
+
+    @Test func newerGenerationPublishesBeforeStaleGenerationWithoutRegression() async {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        let portGate = BlockingGate()
+        let serviceGate = BlockingGate()
+        let portCalls = LockedBox(0)
+        let serviceCalls = LockedBox(0)
+        let controller = MenuBarController(
+            settings: settings,
+            portScanWorker: { _ in
+                portCalls.withValue { $0 += 1 }
+                portGate.wait()
+                return []
+            },
+            serviceSnapshotWorker: { _ in
+                serviceCalls.withValue { $0 += 1 }
+                serviceGate.wait()
+                return ServiceSnapshot(statuses: [])
+            }
+        )
+        defer {
+            controller.stop()
+            portGate.open()
+            serviceGate.open()
+        }
+
+        controller.performRefresh()
+        controller.performRefresh()
+        #expect(await eventually { portCalls.value == 2 && serviceCalls.value == 2 })
+
+        let newestPortStatuses = [
+            PortStatus(port: 4000, isOpen: true, pid: 400, processName: "new")
+        ]
+        let newestServiceStatuses = [
+            ServiceStatus(name: "Newest", detail: "Current", state: .running)
+        ]
+        let newestDockerRows = [
+            DockerContainerPortRow(id: "new", name: "new", detail: "4000 -> 4000")
+        ]
+        controller.settlePortForTesting(generation: 2, statuses: newestPortStatuses)
+        #expect(controller.viewModel.isRefreshing)
+        controller.settleServiceForTesting(
+            generation: 2,
+            snapshot: ServiceSnapshot(
+                statuses: newestServiceStatuses,
+                dockerContainerRows: newestDockerRows
+            )
+        )
+
+        #expect(!controller.viewModel.isRefreshing)
+        #expect(controller.activeGenerationsForTesting == [1])
+        let acceptedStatuses = controller.viewModel.statuses
+        let acceptedError = controller.viewModel.errorMessage
+        let acceptedHistory = controller.viewModel.recentPortChanges
+        let acceptedMenuContent = controller.viewModel.menuBarStatusContent
+        let acceptedServiceStatuses = controller.viewModel.serviceStatuses
+        let acceptedDockerRows = controller.viewModel.dockerContainerRows
+
+        controller.settlePortForTesting(
+            generation: 1,
+            statuses: [
+                PortStatus(
+                    port: 3000,
+                    isOpen: true,
+                    pid: 300,
+                    processName: "stale",
+                    message: "stale port error"
+                )
+            ]
+        )
+        controller.settleServiceForTesting(
+            generation: 1,
+            snapshot: ServiceSnapshot(
+                statuses: [
+                    ServiceStatus(name: "Stale", detail: "Old", state: .stopped)
+                ],
+                dockerContainerRows: [
+                    DockerContainerPortRow(id: "old", name: "old", detail: "3000 -> 3000")
+                ]
+            )
+        )
+        controller.settlePortErrorForTesting(
+            generation: 1,
+            errorMessage: "duplicate stale port error"
+        )
+        controller.settleServiceErrorForTesting(
+            generation: 1,
+            errorMessage: "duplicate stale service error"
+        )
+
+        #expect(!controller.viewModel.isRefreshing)
+        #expect(controller.activeGenerationsForTesting.isEmpty)
+        #expect(controller.viewModel.statuses == acceptedStatuses)
+        #expect(controller.viewModel.errorMessage == acceptedError)
+        #expect(controller.viewModel.recentPortChanges == acceptedHistory)
+        #expect(controller.viewModel.menuBarStatusContent == acceptedMenuContent)
+        #expect(controller.viewModel.serviceStatuses == acceptedServiceStatuses)
+        #expect(controller.viewModel.dockerContainerRows == acceptedDockerRows)
+    }
+
+    @Test func timerStartsAfterNewestGenerationSettlesWhileStaleGenerationRemains() async {
+        let portGate = BlockingGate()
+        let serviceGate = BlockingGate()
+        let portCalls = LockedBox(0)
+        let serviceCalls = LockedBox(0)
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in
+                portCalls.withValue { $0 += 1 }
+                portGate.wait()
+                return []
+            },
+            serviceSnapshotWorker: { _ in
+                serviceCalls.withValue { $0 += 1 }
+                serviceGate.wait()
+                return ServiceSnapshot(statuses: [])
+            }
+        )
+        defer {
+            controller.stop()
+            portGate.open()
+            serviceGate.open()
+        }
+
+        controller.performRefresh()
+        controller.performRefresh()
+        #expect(await eventually { portCalls.value == 2 && serviceCalls.value == 2 })
+
+        controller.settlePortForTesting(generation: 2, statuses: [])
+        controller.settleServiceForTesting(
+            generation: 2,
+            snapshot: ServiceSnapshot(statuses: [])
+        )
+        #expect(controller.activeGenerationsForTesting == [1])
+        #expect(!controller.viewModel.isRefreshing)
+
+        controller.fireTimerForTesting()
+        #expect(controller.nextGenerationForTesting == 3)
+        #expect(await eventually { portCalls.value == 3 && serviceCalls.value == 3 })
+        #expect(controller.activeGenerationsForTesting == [1, 3])
+        #expect(controller.viewModel.isRefreshing)
+
+        controller.settlePortForTesting(generation: 3, statuses: [])
+        controller.settleServiceForTesting(
+            generation: 3,
+            snapshot: ServiceSnapshot(statuses: [])
+        )
+        #expect(controller.activeGenerationsForTesting == [1])
+        #expect(!controller.viewModel.isRefreshing)
+    }
+
+    @Test func staleBranchErrorsSettleWithoutReplacingNewestErrors() async {
+        let portGate = BlockingGate()
+        let serviceGate = BlockingGate()
+        let portCalls = LockedBox(0)
+        let serviceCalls = LockedBox(0)
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in
+                portCalls.withValue { $0 += 1 }
+                portGate.wait()
+                return []
+            },
+            serviceSnapshotWorker: { _ in
+                serviceCalls.withValue { $0 += 1 }
+                serviceGate.wait()
+                return ServiceSnapshot(statuses: [])
+            }
+        )
+        defer {
+            controller.stop()
+            portGate.open()
+            serviceGate.open()
+        }
+
+        controller.performRefresh()
+        controller.performRefresh()
+        #expect(await eventually { portCalls.value == 2 && serviceCalls.value == 2 })
+
+        controller.settlePortErrorForTesting(
+            generation: 2,
+            errorMessage: "newest port error"
+        )
+        controller.settleServiceErrorForTesting(
+            generation: 2,
+            errorMessage: "newest service error"
+        )
+        let acceptedError = controller.viewModel.errorMessage
+        #expect(acceptedError?.contains("newest port error") == true)
+        #expect(acceptedError?.contains("newest service error") == true)
+        #expect(!controller.viewModel.isRefreshing)
+
+        controller.settlePortErrorForTesting(
+            generation: 1,
+            errorMessage: "stale port error"
+        )
+        controller.settleServiceErrorForTesting(
+            generation: 1,
+            errorMessage: "stale service error"
+        )
+
+        #expect(controller.viewModel.errorMessage == acceptedError)
+        #expect(!controller.viewModel.isRefreshing)
+        #expect(controller.activeGenerationsForTesting.isEmpty)
+    }
+
+    @Test func acceptedRequestKeepsBranchErrorsUntilEachLatestBranchSucceeds() async {
+        let portGate = BlockingGate()
+        let serviceGate = BlockingGate()
+        let portCalls = LockedBox(0)
+        let serviceCalls = LockedBox(0)
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in
+                portCalls.withValue { $0 += 1 }
+                portGate.wait()
+                return []
+            },
+            serviceSnapshotWorker: { _ in
+                serviceCalls.withValue { $0 += 1 }
+                serviceGate.wait()
+                return ServiceSnapshot(statuses: [])
+            }
+        )
+        defer {
+            controller.stop()
+            portGate.open()
+            serviceGate.open()
+        }
+
+        controller.performRefresh()
+        #expect(await eventually { portCalls.value == 1 && serviceCalls.value == 1 })
+        controller.settlePortErrorForTesting(
+            generation: 1,
+            errorMessage: "prior port error"
+        )
+        controller.settleServiceErrorForTesting(
+            generation: 1,
+            errorMessage: "prior service error"
+        )
+        #expect(controller.viewModel.errorMessage?.contains("prior port error") == true)
+        #expect(controller.viewModel.errorMessage?.contains("prior service error") == true)
+
+        controller.performRefresh()
+        #expect(await eventually { portCalls.value == 2 && serviceCalls.value == 2 })
+        #expect(controller.viewModel.errorMessage?.contains("prior port error") == true)
+        #expect(controller.viewModel.errorMessage?.contains("prior service error") == true)
+
+        controller.settlePortForTesting(
+            generation: 2,
+            statuses: [PortStatus(port: 3000, isOpen: true)]
+        )
+        #expect(controller.viewModel.errorMessage?.contains("prior port error") == false)
+        #expect(controller.viewModel.errorMessage?.contains("prior service error") == true)
+        #expect(controller.viewModel.isRefreshing)
+
+        controller.settleServiceForTesting(
+            generation: 2,
+            snapshot: ServiceSnapshot(statuses: [])
+        )
+        #expect(controller.viewModel.errorMessage == nil)
+        #expect(!controller.viewModel.isRefreshing)
+    }
+
+    @Test func portAndServiceFailuresRetainPriorBranchDataAndExposeBothErrors() async {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        let shouldFail = LockedBox(false)
+        let controller = MenuBarController(
+            settings: settings,
+            portScanWorker: { _ in
+                if shouldFail.value {
+                    throw TestFailure("port failed")
+                }
+                return [PortStatus(port: 3000, isOpen: true)]
+            },
+            serviceSnapshotWorker: { _ in
+                if shouldFail.value {
+                    throw TestFailure("service failed")
+                }
+                return ServiceSnapshot(statuses: [
+                    ServiceStatus(name: "Docker", detail: "Daemon", state: .running)
+                ])
+            }
+        )
+
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        shouldFail.set(true)
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+
+        #expect(controller.viewModel.statuses.map(\.port) == [3000])
+        #expect(controller.viewModel.serviceStatuses.map(\.name) == ["Docker"])
+        #expect(controller.viewModel.errorMessage?.contains("port failed") == true)
+        #expect(controller.viewModel.errorMessage?.contains("service failed") == true)
+    }
+
+    @Test func blockedScanWorkerDoesNotBlockMainActorHeartbeat() async {
+        let gate = BlockingGate()
+        let heartbeat = LockedBox(false)
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in
+                gate.wait()
+                return []
+            },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
+        )
+
+        controller.performRefresh()
+        #expect(await eventually { gate.hasWaiter })
+        Task { @MainActor in
+            heartbeat.set(true)
+        }
+        #expect(await eventually { heartbeat.value })
+
+        gate.open()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+    }
+
+    @Test func stopCancelsOwnedWorkAndPreventsLatePublication() async {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        let portGate = BlockingGate()
+        let serviceGate = BlockingGate()
+        let portCalls = LockedBox(0)
+        let serviceCalls = LockedBox(0)
+        let controller = MenuBarController(
+            settings: settings,
+            portScanWorker: { _ in
+                portCalls.withValue { $0 += 1 }
+                portGate.wait()
+                return [PortStatus(port: 3000, isOpen: true)]
+            },
+            serviceSnapshotWorker: { _ in
+                serviceCalls.withValue { $0 += 1 }
+                serviceGate.wait()
+                return ServiceSnapshot(statuses: [
+                    ServiceStatus(name: "Late", detail: "Late", state: .running)
+                ])
+            }
+        )
+
+        controller.performRefresh()
+        controller.performRefresh()
+        controller.performRefresh()
+        #expect(await eventually { portCalls.value == 2 && serviceCalls.value == 2 })
+        #expect(controller.pendingGenerationForTesting == 3)
+
+        controller.stop()
+        #expect(!controller.viewModel.isRefreshing)
+        #expect(controller.newestRequestedGenerationForTesting == nil)
+        #expect(controller.activeGenerationsForTesting.isEmpty)
+        #expect(controller.pendingGenerationForTesting == nil)
+
+        controller.settlePortForTesting(
+            generation: 1,
+            statuses: [PortStatus(port: 3000, isOpen: true)]
+        )
+        controller.settleServiceForTesting(
+            generation: 1,
+            snapshot: ServiceSnapshot(statuses: [
+                ServiceStatus(name: "Late", detail: "Late", state: .running)
+            ])
+        )
+        portGate.open()
+        serviceGate.open()
+        for _ in 0..<20 {
+            await Task.yield()
+        }
+
+        #expect(controller.viewModel.statuses.isEmpty)
+        #expect(controller.viewModel.serviceStatuses.isEmpty)
+        #expect(portCalls.value == 2)
+        #expect(serviceCalls.value == 2)
+        controller.performRefresh()
+        #expect(controller.viewModel.statuses.isEmpty)
+    }
+
+    @Test func deallocationPreventsLatePublicationAndPendingStart() async {
+        let portGate = BlockingGate()
+        let serviceGate = BlockingGate()
+        let portCalls = LockedBox(0)
+        let serviceCalls = LockedBox(0)
+        var controller: MenuBarController? = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in
+                portCalls.withValue { $0 += 1 }
+                portGate.wait()
+                return [PortStatus(port: 3000, isOpen: true)]
+            },
+            serviceSnapshotWorker: { _ in
+                serviceCalls.withValue { $0 += 1 }
+                serviceGate.wait()
+                return ServiceSnapshot(statuses: [
+                    ServiceStatus(name: "Late", detail: "Late", state: .running)
+                ])
+            }
+        )
+        weak let weakController = controller
+
+        controller?.performRefresh()
+        controller?.performRefresh()
+        controller?.performRefresh()
+        #expect(await eventually { portCalls.value == 2 && serviceCalls.value == 2 })
+        #expect(controller?.pendingGenerationForTesting == 3)
+
+        controller = nil
+        #expect(weakController == nil)
+
+        portGate.open()
+        serviceGate.open()
+        for _ in 0..<20 {
+            await Task.yield()
+        }
+
+        #expect(portCalls.value == 2)
+        #expect(serviceCalls.value == 2)
+    }
+
+    @Test func killWorkerRunsOffMainActorAndDuplicateConfirmationUsesOneToken() async {
+        let gate = BlockingGate()
+        let killCalls = LockedBox(0)
+        let heartbeat = LockedBox(false)
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) },
+            killWorker: { _ in
+                killCalls.withValue { $0 += 1 }
+                gate.wait()
+            }
+        )
+        let target = KillTarget(port: 3000, pid: 100, processName: "node")
+
+        controller.viewModel.requestKill(target)
+        controller.viewModel.confirmKill()
+        controller.viewModel.confirmKill()
+        #expect(await eventually { gate.hasWaiter })
+        #expect(controller.viewModel.isTerminatingProcess)
+        Task { @MainActor in
+            heartbeat.set(true)
+        }
+        #expect(await eventually { heartbeat.value })
+        #expect(killCalls.value == 1)
+
+        gate.open()
+        #expect(await eventually { !controller.viewModel.isTerminatingProcess })
+        #expect(killCalls.value == 1)
+        #expect(await eventually { controller.lastRefreshTriggerForTesting == .kill })
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+    }
+
+    @Test func defaultKillServiceWiringCancelsWithoutWorkThenRevalidatesTerminatesAndRefreshesOnce() async {
+        let target = KillTarget(port: 3000, pid: 100, processName: "node")
+        let resolver = LockedCountingProcessResolver(
+            processInfo: PortProcessInfo(
+                port: target.port,
+                pid: target.pid,
+                processName: target.processName
+            )
+        )
+        let terminator = LockedCountingProcessTerminator()
+        let refreshCalls = LockedBox(0)
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            killService: KillService(resolver: resolver, terminator: terminator),
+            portScanWorker: { _ in
+                refreshCalls.withValue { $0 += 1 }
+                return []
+            },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
+        )
+        defer { controller.stop() }
+
+        controller.viewModel.requestKill(target)
+        controller.viewModel.cancelKill()
+
+        #expect(resolver.requestedPorts.isEmpty)
+        #expect(terminator.terminatedPIDs.isEmpty)
+        #expect(refreshCalls.value == 0)
+
+        controller.viewModel.requestKill(target)
+        controller.viewModel.confirmKill()
+
+        #expect(await eventually {
+            controller.lastRefreshTriggerForTesting == .kill
+                && !controller.viewModel.isRefreshing
+                && refreshCalls.value == 1
+        })
+        #expect(resolver.requestedPorts == [target.port])
+        #expect(terminator.terminatedPIDs == [target.pid])
+        #expect(refreshCalls.value == 1)
+        #expect(controller.viewModel.killErrorMessage == nil)
+        #expect(controller.viewModel.killConfirmationTarget == nil)
+        #expect(!controller.viewModel.isTerminatingProcess)
+    }
+
+    @Test func killSuccessAndFailureEachTriggerExactlyOneKillRefresh() async {
+        for failureMessage in [String?.none, "denied"] {
+            let refreshCalls = LockedBox(0)
+            let controller = MenuBarController(
+                settings: AppSettings(store: InMemorySettingsStore()),
+                portScanWorker: { _ in
+                    refreshCalls.withValue { $0 += 1 }
+                    return []
+                },
+                serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) },
+                killWorker: { _ in
+                    if let failureMessage {
+                        throw TestFailure(failureMessage)
+                    }
+                }
+            )
+            controller.viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node"))
+            controller.viewModel.confirmKill()
+
+            #expect(await eventually { !controller.viewModel.isTerminatingProcess })
+            #expect(await eventually { controller.lastRefreshTriggerForTesting == .kill })
+            #expect(await eventually { !controller.viewModel.isRefreshing })
+            #expect(refreshCalls.value == 1)
+            #expect(controller.lastRefreshTriggerForTesting == .kill)
+            #expect(controller.viewModel.killErrorMessage == failureMessage)
+        }
+    }
+
+    @Test func stopInvalidatesBlockedKillAndSuppressesLateRefresh() async {
+        let gate = BlockingGate()
+        let refreshCalls = LockedBox(0)
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in
+                refreshCalls.withValue { $0 += 1 }
+                return []
+            },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) },
+            killWorker: { _ in gate.wait() }
+        )
+
+        controller.viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node"))
+        controller.viewModel.confirmKill()
+        #expect(await eventually { gate.hasWaiter })
+        controller.stop()
+        gate.open()
+        for _ in 0..<20 {
+            await Task.yield()
+        }
+
+        #expect(!controller.viewModel.isTerminatingProcess)
+        #expect(refreshCalls.value == 0)
+        #expect(controller.lastRefreshTriggerForTesting == nil)
+    }
+
+    @Test func blockedKillDoesNotRetainControllerOrPublishAfterDeallocation() async {
+        let gate = BlockingGate()
+        let refreshCalls = LockedBox(0)
+        var controller: MenuBarController? = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in
+                refreshCalls.withValue { $0 += 1 }
+                return []
+            },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) },
+            killWorker: { _ in
+                gate.wait()
+                throw TestFailure("late kill failure")
+            }
+        )
+        let viewModel = controller!.viewModel
+        weak let weakController = controller
+        defer { gate.open() }
+
+        viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node"))
+        viewModel.confirmKill()
+        #expect(await eventually { gate.hasWaiter })
+        #expect(viewModel.isTerminatingProcess)
+
+        controller = nil
+        #expect(weakController == nil)
+
+        gate.open()
+        #expect(await eventually { !viewModel.isTerminatingProcess })
+        #expect(refreshCalls.value == 0)
+        #expect(viewModel.killErrorMessage == nil)
+        #expect(viewModel.killConfirmationTarget == nil)
+    }
+    @Test func triggerClassesAreWiredDistinctly() async throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        let controller = MenuBarController(
+            settings: settings,
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) },
+            killWorker: { _ in }
+        )
+        defer { controller.stop() }
+
+        controller.start()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.lastRefreshTriggerForTesting == .startup)
+
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.lastRefreshTriggerForTesting == .manual)
+
+        controller.fireTimerForTesting()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.lastRefreshTriggerForTesting == .timer)
+
+        try controller.viewModel.saveExpression("3000")
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.lastRefreshTriggerForTesting == .settings)
+
+        controller.viewModel.requestKill(KillTarget(port: 3000, pid: 1, processName: "node"))
+        controller.viewModel.confirmKill()
+        #expect(await eventually { !controller.viewModel.isTerminatingProcess })
+        #expect(await eventually { controller.lastRefreshTriggerForTesting == .kill })
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.lastRefreshTriggerForTesting == .kill)
     }
 
     @Test func serviceCompositionPolicyFiltersDefaultPortsAndPreservesOrder() {
@@ -69,76 +933,165 @@ import Testing
         #expect(composedStatuses.map(\.group) == [.builtIn, .builtIn, .custom])
     }
 
-    @Test func refreshUpdatesViewModelTitle() {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        settings.watchedPortsExpression = "3000,3001"
-        var serviceCompletions: [@MainActor ([ServiceStatus]) -> Void] = []
-        let controller = MenuBarController(
-            settings: settings,
-            scanner: PortScanner(
-                connector: FakeSocketConnector(openPorts: [3000, 3001]),
-                lookup: ProcessLookup(runner: FakeProcessRunner())
-            ),
-            serviceStatusLoader: { completion in
-                serviceCompletions.append(completion)
-            }
-        )
-
-        controller.performRefresh()
-
-        #expect(controller.viewModel.statuses.count == 2)
-        #expect(controller.viewModel.openPorts.count == 2)
-        #expect(controller.viewModel.openPorts.allSatisfy { $0.isOpen })
-        #expect(controller.viewModel.menuBarStatusContent.countText == "2")
-    }
-
-    @Test func refreshStoresDockerContainerRowsFromServiceSnapshot() {
+    @Test func refreshRecordsRecentPortChangesAfterInitialBaseline() async {
+        let openPorts = LockedBox<Set<UInt16>>([])
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.watchedPortsExpression = "3000"
-        let dockerRows = [
-            DockerContainerPortRow(
-                id: "container-api",
-                name: "api",
-                detail: "4000 -> 4000"
-            )
-        ]
         let controller = MenuBarController(
             settings: settings,
-            scanner: PortScanner(
-                connector: FakeSocketConnector(openPorts: []),
-                lookup: ProcessLookup(runner: FakeProcessRunner())
-            ),
-            serviceSnapshotLoader: { completion in
-                completion(ServiceSnapshot(
+            portScanWorker: { ports in
+                ports.map { PortStatus(port: $0, isOpen: openPorts.value.contains($0)) }
+            },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
+        )
+
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        openPorts.set([3000])
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+
+        #expect(controller.viewModel.recentPortChanges.map(\.kind) == [.opened])
+        #expect(controller.viewModel.recentPortChanges.map(\.port) == [3000])
+    }
+
+    @Test func portChangeHistoryRetainsVerifiedBaselineThroughFailureAndAmbiguity() async throws {
+        let identityA = try #require(VerifiedProcessIdentity(pid: 10, processName: "node"))
+        let identityB = try #require(VerifiedProcessIdentity(pid: 20, processName: "vite"))
+        let verifiedA = PortStatus(port: 3000, isOpen: true, identityState: .verified(identityA))
+        let verifiedB = PortStatus(port: 3000, isOpen: true, identityState: .verified(identityB))
+        let lookupFailure = PortStatus(
+            port: 3000,
+            isOpen: true,
+            identityState: .unavailable(.lookupFailed(message: "lsof failed"))
+        )
+        let ambiguity = PortStatus(
+            port: 3000,
+            isOpen: true,
+            identityState: .unavailable(.ambiguousListeners(pids: [10, 20]))
+        )
+        let scannedStatus = LockedBox(verifiedA)
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        let controller = MenuBarController(
+            settings: settings,
+            portScanWorker: { _ in [scannedStatus.value] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
+        )
+
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+
+        scannedStatus.set(lookupFailure)
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.viewModel.recentPortChanges.isEmpty)
+        #expect(controller.viewModel.menuBarStatusContent.countText == "1")
+
+        scannedStatus.set(verifiedA)
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.viewModel.recentPortChanges.isEmpty)
+
+        scannedStatus.set(ambiguity)
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.viewModel.recentPortChanges.isEmpty)
+        #expect(controller.viewModel.menuBarStatusContent.countText == "1")
+
+        scannedStatus.set(verifiedB)
+        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+
+        #expect(controller.viewModel.recentPortChanges.count == 1)
+        #expect(controller.viewModel.recentPortChanges.first?.kind == .changed)
+        #expect(controller.viewModel.recentPortChanges.first?.pid == 20)
+        #expect(controller.viewModel.recentPortChanges.first?.processName == "vite")
+    }
+
+    @Test func refreshStoresDockerContainerRowsFromServiceSnapshot() async {
+        let dockerRows = [
+            DockerContainerPortRow(id: "container-api", name: "api", detail: "4000 -> 4000")
+        ]
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in
+                ServiceSnapshot(
                     statuses: [ServiceStatus(name: "Docker", detail: "Daemon", state: .running)],
                     dockerContainerRows: dockerRows
-                ))
+                )
             }
         )
 
         controller.performRefresh()
-
+        #expect(await eventually { !controller.viewModel.isRefreshing })
         #expect(controller.viewModel.serviceStatuses.map(\.name) == ["Docker"])
         #expect(controller.viewModel.dockerContainerRows == dockerRows)
     }
 
-    @Test func refreshAppliesSymbolMenuBarButtonState() {
+    @Test func panelCadenceSwitchesBetweenQuietAndConfiguredIntervals() async {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.refreshInterval = .tenSeconds
+        let controller = MenuBarController(
+            settings: settings,
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
+        )
+        defer { controller.stop() }
+
+        controller.start(showPanelOnLaunch: true)
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        controller.applyPanelClosedForTesting()
+        #expect(controller.activeRefreshCadenceSeconds == MenuBarController.quietRefreshCadence)
+
+        controller.applyPanelOpenedForTesting()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        #expect(controller.activeRefreshCadenceSeconds == RefreshInterval.tenSeconds.rawValue)
+        #expect(controller.currentRefreshTimerInterval == RefreshInterval.tenSeconds.rawValue)
+        #expect(controller.lastRefreshTriggerForTesting == .manual)
+    }
+
+    @Test func panelAndSettingsSnapshotsCanBeWrittenForAutomation() async throws {
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
+        )
+        defer { controller.stop() }
+        let panelURL = FileManager.default.temporaryDirectory
+            .appending(path: "ptk-panel-\(UUID().uuidString).png")
+        let settingsURL = FileManager.default.temporaryDirectory
+            .appending(path: "ptk-settings-\(UUID().uuidString).png")
+        defer {
+            try? FileManager.default.removeItem(at: panelURL)
+            try? FileManager.default.removeItem(at: settingsURL)
+        }
+
+        controller.start(showPanelOnLaunch: true)
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+        try controller.writePanelSnapshot(to: panelURL)
+        try controller.writeSettingsSnapshot(to: settingsURL)
+
+        let panelAttributes = try FileManager.default.attributesOfItem(atPath: panelURL.path)
+        let settingsAttributes = try FileManager.default.attributesOfItem(atPath: settingsURL.path)
+        #expect((panelAttributes[.size] as? Int ?? 0) > 0)
+        #expect((settingsAttributes[.size] as? Int ?? 0) > 0)
+    }
+    @Test func refreshAppliesSymbolMenuBarButtonState() async {
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.watchedPortsExpression = "3000,3001"
         let controller = MenuBarController(
             settings: settings,
-            scanner: PortScanner(
-                connector: FakeSocketConnector(openPorts: [3000, 3001]),
-                lookup: ProcessLookup(runner: FakeProcessRunner())
-            ),
-            serviceStatusLoader: { completion in
-                completion([])
-            }
+            portScanWorker: { ports in
+                ports.map { PortStatus(port: $0, isOpen: true) }
+            },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
         )
         defer { controller.stop() }
 
         controller.start()
-        controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
 
         #expect(controller.menuBarButtonStateForTesting == MenuBarButtonState(
             title: "2",
@@ -148,348 +1101,102 @@ import Testing
         ))
     }
 
-    @Test func refreshRecordsRecentPortChangesAfterInitialBaseline() {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        settings.watchedPortsExpression = "3000,3001"
-        let connector = MutableFakeSocketConnector(openPorts: [])
-        let controller = MenuBarController(
-            settings: settings,
-            scanner: PortScanner(
-                connector: connector,
-                lookup: ProcessLookup(runner: FakeProcessRunner())
-            ),
-            serviceStatusLoader: { _ in }
-        )
-
-        controller.performRefresh()
-        #expect(controller.viewModel.recentPortChanges.isEmpty)
-
-        connector.openPorts = [3000]
-        controller.performRefresh()
-        #expect(controller.viewModel.recentPortChanges.map(\.kind) == [.opened])
-        #expect(controller.viewModel.recentPortChanges.map(\.port) == [3000])
-
-        connector.openPorts = []
-        controller.performRefresh()
-        #expect(controller.viewModel.recentPortChanges.map(\.kind).prefix(2) == [.closed, .opened])
-        #expect(controller.viewModel.recentPortChanges.map(\.port).prefix(2) == [3000, 3000])
-    }
-
-    @Test func recentPortChangesAreCappedAtFourNewestFirst() {
+    @Test func recentPortChangesRemainCappedAndTrackIdentityChanges() async {
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.watchedPortsExpression = "3000-3004"
-        let connector = MutableFakeSocketConnector(openPorts: [])
+        let scannedStatuses = LockedBox(
+            (UInt16(3000)...UInt16(3004)).map { PortStatus(port: $0, isOpen: false) }
+        )
         let controller = MenuBarController(
             settings: settings,
-            scanner: PortScanner(
-                connector: connector,
-                lookup: ProcessLookup(runner: FakeProcessRunner())
-            ),
-            serviceStatusLoader: { _ in }
+            portScanWorker: { _ in scannedStatuses.value },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
         )
 
         controller.performRefresh()
+        #expect(await eventually { !controller.viewModel.isRefreshing })
+
         for port in UInt16(3000)...UInt16(3004) {
-            connector.openPorts.insert(port)
+            scannedStatuses.withValue { statuses in
+                let index = Int(port - 3000)
+                statuses[index] = PortStatus(
+                    port: port,
+                    isOpen: true,
+                    pid: Int(port),
+                    processName: port == 3004 ? "vite" : "node"
+                )
+            }
             controller.performRefresh()
+            #expect(await eventually { !controller.viewModel.isRefreshing })
         }
 
         #expect(controller.viewModel.recentPortChanges.count == 4)
-        #expect(controller.viewModel.recentPortChanges.map(\.kind) == [.opened, .opened, .opened, .opened])
         #expect(controller.viewModel.recentPortChanges.map(\.port) == [3004, 3003, 3002, 3001])
+        #expect(controller.viewModel.recentPortChanges.first?.processName == "vite")
+        #expect(controller.viewModel.menuBarStatusContent.countText == "5")
     }
 
-    @Test func recentPortChangesRecordProcessIdentityChangesNewestFirst() {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        settings.watchedPortsExpression = "3000"
-        let connector = MutableFakeSocketConnector(openPorts: [3000])
-        let runner = FakeProcessRunner()
-        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
-            exitCode: 0,
-            stdout: """
-            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-            node    111 me   1u IPv4 0x1    0t0      TCP *:3000 (LISTEN)
-            """
-        )
-        runner.results["ps -p 111 -o comm="] = ProcessRunResult(exitCode: 0, stdout: "/usr/local/bin/node\n")
+    @Test func startShowsPanelImmediatelyForAutomation() async {
         let controller = MenuBarController(
-            settings: settings,
-            scanner: PortScanner(
-                connector: connector,
-                lookup: ProcessLookup(runner: runner)
-            ),
-            serviceStatusLoader: { _ in }
-        )
-
-        controller.performRefresh()
-        #expect(controller.viewModel.recentPortChanges.isEmpty)
-
-        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
-            exitCode: 0,
-            stdout: """
-            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-            vite    222 me   1u IPv4 0x2    0t0      TCP *:3000 (LISTEN)
-            """
-        )
-        runner.results["ps -p 222 -o comm="] = ProcessRunResult(exitCode: 0, stdout: "vite\n")
-        controller.performRefresh()
-
-        let change = controller.viewModel.recentPortChanges.first
-        #expect(change?.kind == .changed)
-        #expect(change?.port == 3000)
-        #expect(change?.pid == 222)
-        #expect(change?.processName == "vite")
-        #expect(controller.viewModel.recentPortChanges.count == 1)
-    }
-
-    @Test func recentChangesDoNotAlterMenuBarStatusContent() {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        settings.watchedPortsExpression = "3000"
-        let connector = MutableFakeSocketConnector(openPorts: [])
-        let controller = MenuBarController(
-            settings: settings,
-            scanner: PortScanner(
-                connector: connector,
-                lookup: ProcessLookup(runner: FakeProcessRunner())
-            ),
-            serviceStatusLoader: { _ in }
-        )
-
-        controller.performRefresh()
-        let baselineContent = controller.viewModel.menuBarStatusContent
-
-        connector.openPorts = [3000]
-        controller.performRefresh()
-
-        #expect(controller.viewModel.recentPortChanges.map(\.kind) == [.opened])
-        #expect(controller.viewModel.menuBarStatusContent == MenuBarStatusContent(
-            symbolName: "network",
-            countText: "1",
-            toolTip: "PTK · 1 open port",
-            accessibilityLabel: "PTK, 1 open port"
-        ))
-        #expect(baselineContent == MenuBarStatusContent(
-            symbolName: "network",
-            countText: "0",
-            toolTip: "PTK · 0 open ports",
-            accessibilityLabel: "PTK, 0 open ports"
-        ))
-    }
-
-    @Test func refreshSetsErrorOnBadExpression() {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        settings.watchedPortsExpression = "invalid-!!!"
-        var serviceLoadCount = 0
-        let controller = MenuBarController(
-            settings: settings,
-            serviceStatusLoader: { completion in
-                serviceLoadCount += 1
-                completion([])
-            }
-        )
-
-        controller.performRefresh()
-
-        #expect(controller.viewModel.hasError)
-        #expect(controller.viewModel.openPorts.isEmpty)
-    }
-
-    @Test func startCanShowPanelImmediatelyForAutomation() {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        let controller = MenuBarController(
-            settings: settings,
-            serviceStatusLoader: { completion in
-                completion([])
-            }
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
         )
         defer { controller.stop() }
 
         controller.start(showPanelOnLaunch: true)
+        #expect(await eventually { !controller.viewModel.isRefreshing })
 
         #expect(controller.isPanelVisible)
-    }
-
-    @Test func panelClosedUsesQuietCadenceSlowerThanAllUserIntervals() {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        settings.refreshInterval = .tenSeconds
-        let controller = MenuBarController(
-            settings: settings,
-            serviceStatusLoader: { completion in completion([]) }
-        )
-        defer { controller.stop() }
-
-        controller.start(showPanelOnLaunch: true)
-        controller.applyPanelClosedForTesting()
-
         #expect(MenuBarController.quietRefreshCadence > RefreshInterval.allCases.map(\.rawValue).max()!)
-        #expect(controller.activeRefreshCadenceSeconds == MenuBarController.quietRefreshCadence)
-        #expect((controller.currentRefreshTimerInterval ?? 0) > RefreshInterval.tenSeconds.rawValue)
     }
 
-    @Test func panelReopenRestoresNormalTenSecondCadenceAndRefreshes() {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        settings.refreshInterval = .tenSeconds
-        var refreshCount = 0
+    @Test func dockerRowsCanBeRenderedInPanelSnapshot() async throws {
         let controller = MenuBarController(
-            settings: settings,
-            scanner: PortScanner(
-                connector: FakeSocketConnector(openPorts: []),
-                lookup: ProcessLookup(runner: FakeProcessRunner())
-            ),
-            serviceStatusLoader: { completion in
-                refreshCount += 1
-                completion([])
-            }
-        )
-        defer { controller.stop() }
-
-        controller.start(showPanelOnLaunch: true)
-        controller.applyPanelClosedForTesting()
-        let closedRefreshCount = refreshCount
-        controller.applyPanelOpenedForTesting()
-
-        #expect(controller.activeRefreshCadenceSeconds == RefreshInterval.tenSeconds.rawValue)
-        #expect(controller.currentRefreshTimerInterval == RefreshInterval.tenSeconds.rawValue)
-        #expect(refreshCount > closedRefreshCount)
-    }
-
-
-    @Test func panelSnapshotCanBeWrittenForAutomation() throws {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        settings.theme = .dark
-        let controller = MenuBarController(
-            settings: settings,
-            serviceStatusLoader: { completion in
-                completion([])
-            }
-        )
-        defer { controller.stop() }
-        let snapshotURL = FileManager.default.temporaryDirectory
-            .appending(path: "ptk-panel-snapshot-test-\(UUID().uuidString).png")
-        defer { try? FileManager.default.removeItem(at: snapshotURL) }
-
-        controller.start(showPanelOnLaunch: true)
-        try controller.writePanelSnapshot(to: snapshotURL)
-
-        let attributes = try FileManager.default.attributesOfItem(atPath: snapshotURL.path)
-        #expect((attributes[.size] as? Int ?? 0) > 0)
-    }
-
-    @Test func panelSnapshotRendersRecentPortChangesForAutomation() throws {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        settings.theme = .dark
-        settings.watchedPortsExpression = "3000"
-        let connector = MutableFakeSocketConnector(openPorts: [])
-        let controller = MenuBarController(
-            settings: settings,
-            scanner: PortScanner(
-                connector: connector,
-                lookup: ProcessLookup(runner: FakeProcessRunner())
-            ),
-            serviceStatusLoader: { completion in completion([]) }
-        )
-        defer { controller.stop() }
-        let snapshotURL = FileManager.default.temporaryDirectory
-            .appending(path: "ptk-recent-changes-panel-snapshot-test-\(UUID().uuidString).png")
-        defer { try? FileManager.default.removeItem(at: snapshotURL) }
-
-        controller.start(showPanelOnLaunch: true)
-        controller.performRefresh()
-        connector.openPorts = [3000]
-        controller.performRefresh()
-        try controller.writePanelSnapshot(to: snapshotURL)
-
-        let attributes = try FileManager.default.attributesOfItem(atPath: snapshotURL.path)
-        #expect((attributes[.size] as? Int ?? 0) > 0)
-        #expect(controller.viewModel.recentPortChanges.map(\.kind) == [.opened])
-    }
-
-    @Test func panelSnapshotCanRenderDockerContainerRowsForAutomation() throws {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        settings.theme = .dark
-        settings.watchedPortsExpression = "3000"
-        let controller = MenuBarController(
-            settings: settings,
-            scanner: PortScanner(
-                connector: FakeSocketConnector(openPorts: []),
-                lookup: ProcessLookup(runner: FakeProcessRunner())
-            ),
-            serviceSnapshotLoader: { completion in
-                completion(ServiceSnapshot(
-                    statuses: [
-                        ServiceStatus(name: "Docker", detail: "Daemon", state: .running),
-                        ServiceStatus(name: "PostgreSQL", detail: "Port 5432", state: .stopped)
-                    ],
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in
+                ServiceSnapshot(
+                    statuses: [ServiceStatus(name: "Docker", detail: "Daemon", state: .running)],
                     dockerContainerRows: [
                         DockerContainerPortRow(
-                            id: "container-very-long-api-name",
+                            id: "container-api",
                             name: "very-long-api-container-name",
-                            detail: "4000 -> 4000, 9229 -> 9229, 9230 -> 9230, +1"
-                        ),
-                        DockerContainerPortRow(
-                            id: "container-web",
-                            name: "web",
-                            detail: "3000 -> 80"
+                            detail: "4000 -> 4000, 9229 -> 9229, +1"
                         )
                     ]
-                ))
+                )
             }
         )
         defer { controller.stop() }
         let snapshotURL = FileManager.default.temporaryDirectory
-            .appending(path: "ptk-docker-container-rows-snapshot-test-\(UUID().uuidString).png")
+            .appending(path: "ptk-docker-\(UUID().uuidString).png")
         defer { try? FileManager.default.removeItem(at: snapshotURL) }
 
         controller.start(showPanelOnLaunch: true)
+        #expect(await eventually { !controller.viewModel.isRefreshing })
         try controller.writePanelSnapshot(to: snapshotURL)
 
         let attributes = try FileManager.default.attributesOfItem(atPath: snapshotURL.path)
-        #expect(controller.viewModel.dockerContainerRows.count == 2)
+        #expect(controller.viewModel.dockerContainerRows.count == 1)
         #expect((attributes[.size] as? Int ?? 0) > 0)
     }
 
-    @Test func settingsSnapshotCanBeWrittenForAutomation() throws {
-        let settings = AppSettings(store: InMemorySettingsStore())
-        let controller = MenuBarController(
-            settings: settings,
-            serviceStatusLoader: { completion in
-                completion([])
-            }
-        )
-        defer { controller.stop() }
-        let snapshotURL = FileManager.default.temporaryDirectory
-            .appending(path: "ptk-settings-snapshot-test-\(UUID().uuidString).png")
-        defer { try? FileManager.default.removeItem(at: snapshotURL) }
-
-        controller.start(showPanelOnLaunch: true)
-        try controller.writeSettingsSnapshot(to: snapshotURL)
-
-        let attributes = try FileManager.default.attributesOfItem(atPath: snapshotURL.path)
-        #expect((attributes[.size] as? Int ?? 0) > 0)
-    }
-
-    @Test func iconButtonVisualStateResolvesHoverAndPressFeedback() {
+    @Test func iconButtonVisualStateAndInteractionSnapshotRemainAvailable() throws {
         let idle = PTKIconButtonVisualState(isHovering: false, isPressed: false)
         let hovering = PTKIconButtonVisualState(isHovering: true, isPressed: false)
         let pressed = PTKIconButtonVisualState(isHovering: true, isPressed: true)
-
-        #expect(idle.scale == 1)
         #expect(hovering.scale > idle.scale)
-        #expect(hovering.backgroundOpacity > idle.backgroundOpacity)
         #expect(pressed.scale < idle.scale)
         #expect(pressed.backgroundOpacity > hovering.backgroundOpacity)
-    }
 
-    @Test func buttonInteractionSnapshotCanBeWrittenForAutomation() throws {
-        let settings = AppSettings(store: InMemorySettingsStore())
         let controller = MenuBarController(
-            settings: settings,
-            serviceStatusLoader: { completion in
-                completion([])
-            }
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
         )
         let snapshotURL = FileManager.default.temporaryDirectory
-            .appending(path: "ptk-button-interaction-snapshot-test-\(UUID().uuidString).png")
+            .appending(path: "ptk-button-\(UUID().uuidString).png")
         defer { try? FileManager.default.removeItem(at: snapshotURL) }
 
         try controller.writeButtonInteractionSnapshot(to: snapshotURL)
@@ -644,6 +1351,51 @@ import Testing
         #expect(viewModel.killConfirmationTarget == nil)
     }
 
+    @Test func confirmKillGuardsDuplicatesAndClearsProgressOnSuccess() async {
+        var killCalls = 0
+        let viewModel = makeViewModel(onKill: { _ in
+            killCalls += 1
+            await Task.yield()
+            return .settled(errorMessage: nil)
+        })
+        let target = KillTarget(port: 3000, pid: 100, processName: "node")
+
+        viewModel.requestKill(target)
+        viewModel.confirmKill()
+        viewModel.confirmKill()
+
+        #expect(viewModel.killConfirmationTarget == nil)
+        #expect(viewModel.isTerminatingProcess)
+        #expect(await eventually { !viewModel.isTerminatingProcess })
+        #expect(killCalls == 1)
+        #expect(viewModel.killErrorMessage == nil)
+    }
+
+    @Test func confirmKillPublishesBeforeRequestingSettledRefresh() async {
+        let expectedError = "PID changed from 100 to 101; refresh and try again"
+        var observedError: String?
+        var observedProgress: Bool?
+        var viewModel: PortMonitorViewModel!
+        viewModel = makeViewModel(
+            onKill: { _ in
+                .settled(errorMessage: expectedError)
+            },
+            onKillSettled: {
+                observedError = viewModel.killErrorMessage
+                observedProgress = viewModel.isTerminatingProcess
+            }
+        )
+        defer { viewModel = nil }
+
+        viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node"))
+        viewModel.confirmKill()
+
+        #expect(await eventually { !viewModel.isTerminatingProcess })
+        #expect(viewModel.killErrorMessage == expectedError)
+        #expect(observedError == expectedError)
+        #expect(observedProgress == false)
+    }
+
     @Test func saveIntervalNotifiesSchedulerOwner() {
         var changedInterval: RefreshInterval?
         let viewModel = makeViewModel(onIntervalChange: { interval in
@@ -666,6 +1418,73 @@ import Testing
         let reloaded = AppSettings(store: store)
         #expect(viewModel.theme == .light)
         #expect(reloaded.theme == .light)
+    }
+
+    @Test func settingsDraftChangesAreDiscardedWithoutSave() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+        try settings.saveCustomPortProfile(title: "Original", expression: "3000")
+        try settings.saveCustomServiceEndpoint(name: "Redis", port: 6379)
+        settings.theme = .system
+        let viewModel = makeViewModel(settings: settings)
+
+        var draft = viewModel.makeSettingsDraft()
+        draft.theme = .dark
+        draft.customPortProfiles = try viewModel.addingCustomProfile(
+            title: "Temporary",
+            expression: "5173",
+            to: draft.customPortProfiles
+        )
+        draft.customPortProfiles.removeAll { $0.title == "Original" }
+        draft.customServiceEndpoints.removeAll()
+
+        let reloaded = AppSettings(store: store)
+        #expect(reloaded.theme == .system)
+        #expect(try reloaded.loadCustomPortProfiles().map(\.title) == ["Original"])
+        #expect(try reloaded.loadCustomServiceEndpoints().map(\.name) == ["Redis"])
+    }
+
+    @Test func saveSettingsDraftPersistsAllChangesAndNotifiesOnce() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+        var refreshCount = 0
+        var changedInterval: RefreshInterval?
+        let viewModel = makeViewModel(
+            settings: settings,
+            onSettingsRefresh: { refreshCount += 1 },
+            onIntervalChange: { changedInterval = $0 }
+        )
+        let draft = SettingsDraft(
+            portExpression: "3000,5173",
+            refreshInterval: .tenSeconds,
+            theme: .dark,
+            customPortProfiles: [PortProfile(id: "web", title: "Web", expression: "5173")],
+            customServiceEndpoints: [DatabaseEndpoint(name: "Redis", port: 6379)]
+        )
+
+        try viewModel.saveSettingsDraft(draft)
+
+        let reloaded = AppSettings(store: store)
+        #expect(reloaded.watchedPortsExpression == "3000,5173")
+        #expect(reloaded.refreshInterval == .tenSeconds)
+        #expect(reloaded.theme == .dark)
+        #expect(try reloaded.loadCustomPortProfiles() == draft.customPortProfiles)
+        #expect(try reloaded.loadCustomServiceEndpoints() == draft.customServiceEndpoints)
+        #expect(refreshCount == 1)
+        #expect(changedInterval == .tenSeconds)
+    }
+
+    @Test func corruptSettingsAreVisibleAndDraftSavePreservesOriginal() {
+        let store = InMemorySettingsStore()
+        let original = #"not json"#
+        store.set(original, forKey: AppSettings.Key.customPortProfiles)
+        let viewModel = makeViewModel(settings: AppSettings(store: store))
+
+        #expect(viewModel.settingsErrorMessage?.contains(AppSettings.Key.customPortProfiles) == true)
+        #expect(throws: AppSettingsError.corruptStoredValue(AppSettings.Key.customPortProfiles)) {
+            try viewModel.saveSettingsDraft(viewModel.makeSettingsDraft())
+        }
+        #expect(store.string(forKey: AppSettings.Key.customPortProfiles) == original)
     }
 
     @Test func applyPresetPersistsExpressionAndRefreshes() throws {
@@ -705,7 +1524,7 @@ import Testing
         #expect(viewModel.portExpression == "3000,5173")
         #expect(refreshCount == 1)
 
-        viewModel.deleteCustomProfile(viewModel.customPortProfiles[0])
+        try viewModel.deleteCustomProfile(viewModel.customPortProfiles[0])
         #expect(viewModel.customPortProfiles.isEmpty)
         #expect(AppSettings(store: store).customPortProfiles.isEmpty)
     }
@@ -747,7 +1566,7 @@ import Testing
         #expect(viewModel.customServiceEndpoints == [DatabaseEndpoint(name: "RabbitMQ", port: 5672)])
         #expect(refreshCount == 1)
 
-        viewModel.deleteCustomServiceEndpoint(viewModel.customServiceEndpoints[0])
+        try viewModel.deleteCustomServiceEndpoint(viewModel.customServiceEndpoints[0])
         #expect(viewModel.customServiceEndpoints.isEmpty)
         #expect(AppSettings(store: store).customServiceEndpoints.isEmpty)
         #expect(refreshCount == 2)
@@ -920,7 +1739,10 @@ import Testing
             message: "lsof failed"
         )))
         let missingPID = try #require(presenter.diagnostic(for: PortStatus(port: 3002, isOpen: true)))
-        let missingProcessName = try #require(presenter.diagnostic(for: PortStatus(port: 3003, isOpen: true, pid: 333)))
+        let missingProcessNameStatus = PortStatus(port: 3003, isOpen: true, pid: 333)
+        let missingProcessName = try #require(presenter.diagnostic(for: missingProcessNameStatus))
+        #expect(missingProcessNameStatus.pid == nil)
+        #expect(missingProcessNameStatus.processName == nil)
 
         #expect(ambiguous.title == "여러 listener가 있어 안전하게 종료할 수 없음")
         #expect(ambiguous.detail == "ambiguous process lookup: port 3000 has PIDs 1, 2")
@@ -940,30 +1762,113 @@ import Testing
 @MainActor private func makeViewModel(
     settings: AppSettings = AppSettings(store: InMemorySettingsStore()),
     onRefresh: @escaping () -> Void = {},
+    onSettingsRefresh: (() -> Void)? = nil,
+    onKill: @escaping @MainActor (KillTarget) async -> KillRequestResult = { _ in .invalidated },
+    onKillSettled: @escaping () -> Void = {},
     onIntervalChange: @escaping (RefreshInterval) -> Void = { _ in },
     onOpenLocalhost: @escaping (URL) -> Void = { _ in },
     onCopyText: @escaping (String) -> Void = { _ in }
 ) -> PortMonitorViewModel {
     PortMonitorViewModel(
         settings: settings,
-        killService: KillService(
-            resolver: ProcessLookup(runner: FakeProcessRunner()),
-            terminator: FakeProcessTerminator()
-        ),
         parser: PortRangeParser(),
         onRefresh: onRefresh,
+        onSettingsRefresh: onSettingsRefresh ?? onRefresh,
+        onKill: onKill,
+        onKillSettled: onKillSettled,
         onIntervalChange: onIntervalChange,
         onOpenLocalhost: onOpenLocalhost,
         onCopyText: onCopyText
     )
 }
 
-private final class FakeProcessRunner: ProcessRunning {
-    var results: [String: ProcessRunResult] = [:]
+@MainActor private func eventually(
+    attempts: Int = 1_000,
+    _ predicate: @MainActor () -> Bool
+) async -> Bool {
+    for _ in 0..<attempts {
+        if predicate() {
+            return true
+        }
+        await Task.yield()
+    }
+    return predicate()
+}
 
-    func run(_ executable: String, arguments: [String]) throws -> ProcessRunResult {
+private final class LockedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue: Value
+
+    init(_ value: Value) {
+        storedValue = value
+    }
+
+    var value: Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedValue
+    }
+
+    func set(_ value: Value) {
+        lock.lock()
+        storedValue = value
+        lock.unlock()
+    }
+
+    func withValue(_ body: (inout Value) -> Void) {
+        lock.lock()
+        body(&storedValue)
+        lock.unlock()
+    }
+}
+
+private final class BlockingGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var isOpen = false
+    private var waiterPresent = false
+
+    var hasWaiter: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return waiterPresent
+    }
+
+    func wait() {
+        condition.lock()
+        waiterPresent = true
+        while !isOpen {
+            condition.wait()
+        }
+        condition.unlock()
+    }
+
+    func open() {
+        condition.lock()
+        isOpen = true
+        condition.broadcast()
+        condition.unlock()
+    }
+}
+
+private struct TestFailure: Error, CustomStringConvertible, Sendable {
+    let description: String
+
+    init(_ description: String) {
+        self.description = description
+    }
+}
+
+private final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
+    private let storage = LockedBox<[String: ProcessRunResult]>([:])
+
+    var results: [String: ProcessRunResult] {
+        get { storage.value }
+        set { storage.set(newValue) }
+    }
+
+    func run(_ executable: String, arguments: [String], timeout: TimeInterval) throws -> ProcessRunResult {
         let key = ([executable] + arguments).joined(separator: " ")
-        return results[key] ?? ProcessRunResult(exitCode: 0, stdout: "")
+        return storage.value[key] ?? ProcessRunResult(exitCode: 0, stdout: "")
     }
 }
 
@@ -975,18 +1880,64 @@ private struct FakeSocketConnector: SocketConnecting {
     }
 }
 
-private final class MutableFakeSocketConnector: SocketConnecting {
-    var openPorts: Set<UInt16>
+private final class MutableFakeSocketConnector: SocketConnecting, @unchecked Sendable {
+    private let storage: LockedBox<Set<UInt16>>
 
     init(openPorts: Set<UInt16>) {
-        self.openPorts = openPorts
+        storage = LockedBox(openPorts)
+    }
+
+    var openPorts: Set<UInt16> {
+        get { storage.value }
+        set { storage.set(newValue) }
     }
 
     func isListening(host: String, port: UInt16, timeout: Double) -> Bool {
-        openPorts.contains(port)
+        storage.value.contains(port)
     }
 }
 
-private final class FakeProcessTerminator: ProcessTerminating {
+private final class LockedCountingProcessResolver: ProcessResolving, @unchecked Sendable {
+    private let lock = NSLock()
+    private let processInfo: PortProcessInfo?
+    private var storedRequestedPorts: [UInt16] = []
+
+    init(processInfo: PortProcessInfo?) {
+        self.processInfo = processInfo
+    }
+
+    var requestedPorts: [UInt16] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRequestedPorts
+    }
+
+    func info(for port: UInt16) throws -> PortProcessInfo? {
+        lock.lock()
+        storedRequestedPorts.append(port)
+        lock.unlock()
+        return processInfo
+    }
+}
+
+private final class LockedCountingProcessTerminator: ProcessTerminating, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedTerminatedPIDs: [Int] = []
+
+    var terminatedPIDs: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedTerminatedPIDs
+    }
+
+    func terminate(pid: Int) -> String? {
+        lock.lock()
+        storedTerminatedPIDs.append(pid)
+        lock.unlock()
+        return nil
+    }
+}
+
+private final class FakeProcessTerminator: ProcessTerminating, @unchecked Sendable {
     func terminate(pid: Int) -> String? { nil }
 }

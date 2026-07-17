@@ -27,7 +27,11 @@ struct PortSummaryHeaderView: View {
                     Capsule().strokeBorder(viewModel.openPorts.isEmpty ? PTKTheme.border : PTKTheme.green.opacity(0.22), lineWidth: 1)
                 }
 
-            PanelIconButton(systemName: "arrow.clockwise", help: "새로고침") {
+            PanelIconButton(
+                systemName: "arrow.clockwise",
+                help: "새로고침",
+                accessibilityHint: "포트와 서비스 상태를 지금 다시 확인합니다."
+            ) {
                 viewModel.refresh()
             }
         }

@@ -1,24 +1,131 @@
 import Foundation
 
+public struct VerifiedProcessIdentity: Equatable, Sendable {
+    public let pid: Int
+    public let processName: String
+
+    init?(pid: Int, processName: String) {
+        let trimmedProcessName = processName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard pid > 0, !trimmedProcessName.isEmpty else { return nil }
+
+        self.pid = pid
+        self.processName = trimmedProcessName
+    }
+}
+
+public enum PortIdentityUnavailableCause: Equatable, Sendable {
+    case noVerifiedListener
+    case untrustedListener(message: String)
+    case ambiguousListeners(pids: [Int])
+    case lookupFailed(message: String)
+    case processNameUnavailable(pid: Int)
+}
+
+public enum PortIdentityState: Equatable, Sendable {
+    case verified(VerifiedProcessIdentity)
+    case unavailable(PortIdentityUnavailableCause)
+}
+
 public struct PortStatus: Equatable, Sendable {
     public let port: UInt16
     public let isOpen: Bool
-    public let pid: Int?
-    public let processName: String?
-    public let message: String?
+    public let identityState: PortIdentityState?
+
+    public var verifiedIdentity: VerifiedProcessIdentity? {
+        guard case .verified(let identity) = identityState else { return nil }
+        return identity
+    }
+
+    public var pid: Int? {
+        verifiedIdentity?.pid
+    }
+
+    public var processName: String? {
+        verifiedIdentity?.processName
+    }
+
+    public var message: String? {
+        switch identityState {
+        case .unavailable(.untrustedListener(let message)),
+             .unavailable(.lookupFailed(let message)):
+            message
+        case .unavailable(.ambiguousListeners(let pids)):
+            "ambiguous process lookup: port \(port) has PIDs \(pids.map(String.init).joined(separator: ", "))"
+        case .verified, .unavailable(.noVerifiedListener),
+             .unavailable(.processNameUnavailable), nil:
+            nil
+        }
+    }
+
+    public var killTarget: KillTarget? {
+        guard let identity = verifiedIdentity else { return nil }
+        return KillTarget(port: port, pid: identity.pid, processName: identity.processName)
+    }
 
     public init(
+        port: UInt16,
+        isOpen: Bool,
+        identityState: PortIdentityState?
+    ) {
+        self.port = port
+        self.isOpen = isOpen
+        self.identityState = isOpen
+            ? identityState ?? .unavailable(.noVerifiedListener)
+            : nil
+    }
+
+    init(
         port: UInt16,
         isOpen: Bool,
         pid: Int? = nil,
         processName: String? = nil,
         message: String? = nil
     ) {
-        self.port = port
-        self.isOpen = isOpen
-        self.pid = pid
-        self.processName = processName
-        self.message = message
+        let identityState: PortIdentityState?
+        if !isOpen {
+            identityState = nil
+        } else if let pid,
+                  let processName,
+                  let identity = VerifiedProcessIdentity(pid: pid, processName: processName) {
+            identityState = .verified(identity)
+        } else {
+            identityState = .unavailable(Self.unavailableCause(
+                pid: pid,
+                message: message
+            ))
+        }
+
+        self.init(port: port, isOpen: isOpen, identityState: identityState)
+    }
+
+    private static func unavailableCause(
+        pid: Int?,
+        message: String?
+    ) -> PortIdentityUnavailableCause {
+        if let message, !message.isEmpty {
+            let pids = ambiguousPIDs(in: message)
+            if !pids.isEmpty {
+                return .ambiguousListeners(pids: pids)
+            }
+            return .lookupFailed(message: message)
+        }
+        if let pid, pid > 0 {
+            return .processNameUnavailable(pid: pid)
+        }
+        return .noVerifiedListener
+    }
+
+    private static func ambiguousPIDs(in message: String) -> [Int] {
+        guard message.localizedCaseInsensitiveContains("ambiguous"),
+              let markerRange = message.range(of: "PIDs", options: .caseInsensitive) else {
+            return []
+        }
+
+        return message[markerRange.upperBound...]
+            .split(separator: ",")
+            .compactMap { component in
+                Int(component.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
     }
 }
 
@@ -31,23 +138,18 @@ public enum KillUnavailableCause: Equatable, Sendable {
 
 public extension PortStatus {
     var killUnavailableCause: KillUnavailableCause? {
-        guard isOpen else { return nil }
-        guard KillTarget.safe(port: port, pid: pid, processName: processName) == nil else {
-            return nil
-        }
-        if let message, !message.isEmpty {
-            if message.localizedCaseInsensitiveContains("ambiguous") {
-                return .ambiguousListener(message: message)
-            }
-            return .lookupFailed(message: message)
-        }
-        guard let pid, pid > 0 else {
+        guard case .unavailable(let cause) = identityState else { return nil }
+
+        switch cause {
+        case .noVerifiedListener:
             return .missingPID
-        }
-        guard let processName, !processName.isEmpty else {
+        case .untrustedListener(let message), .lookupFailed(let message):
+            return .lookupFailed(message: message)
+        case .ambiguousListeners:
+            return .ambiguousListener(message: message ?? "")
+        case .processNameUnavailable(let pid):
             return .missingProcessName(pid: pid)
         }
-        return nil
     }
 }
 
@@ -100,16 +202,37 @@ public struct PortChange: Equatable, Identifiable, Sendable {
                 )
             }
             if status.isOpen,
-               previousStatus.pid != status.pid || previousStatus.processName != status.processName {
+               let previousIdentity = previousStatus.verifiedIdentity,
+               let currentIdentity = status.verifiedIdentity,
+               previousIdentity != currentIdentity {
                 return PortChange(
                     port: status.port,
                     kind: .changed,
-                    pid: status.pid,
-                    processName: status.processName,
+                    pid: currentIdentity.pid,
+                    processName: currentIdentity.processName,
                     occurredAt: occurredAt
                 )
             }
             return nil
+        }
+    }
+
+    public static func mergedBaseline(
+        previous: [PortStatus]?,
+        current: [PortStatus]
+    ) -> [PortStatus] {
+        guard let previous else { return current }
+
+        let previousByPort = Dictionary(uniqueKeysWithValues: previous.map { ($0.port, $0) })
+        return current.map { status in
+            guard status.isOpen,
+                  status.verifiedIdentity == nil,
+                  let previousStatus = previousByPort[status.port],
+                  previousStatus.isOpen,
+                  previousStatus.verifiedIdentity != nil else {
+                return status
+            }
+            return previousStatus
         }
     }
 }
