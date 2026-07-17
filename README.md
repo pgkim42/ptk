@@ -32,7 +32,8 @@ tool stays trustworthy as it grows.
 
 ## Status
 
-- Current release line: `0.5.0`
+- Current release preparation: `0.6.0` (not yet released)
+- Latest published artifacts: `0.5.0`
 - Platform: macOS 13+
 - Runtime: Swift, AppKit, SwiftUI
 - Entry point: `macos/`
@@ -41,9 +42,9 @@ tool stays trustworthy as it grows.
 - Scope: personal tool, maintained as a public open-source repository
 - License: `0BSD` (`SPDX-License-Identifier: 0BSD`)
 
-`CHANGELOG.md` is the source of truth for the current release version. The
-release line above and artifact names in this README mirror its latest
-non-Unreleased entry.
+`CHANGELOG.md` distinguishes the current release preparation from published
+artifacts. The `0.5.0` artifact names below remain the latest downloadable
+release until `0.6.0` is published.
 
 PTK is distributed as unsigned manual release artifacts for now. It does not
 use paid Developer ID signing, notarization, App Store distribution, Sparkle, or
@@ -57,7 +58,7 @@ an update server yet.
   safety boundary.
 - `SECURITY.md` covers private reporting and safe handling of machine-specific
   details.
-- `docs/roadmap.md` tracks release and local diagnostic console roadmap work.
+- `docs/roadmap.md` tracks release preparation and maintenance priorities.
 - The app runtime is Swift-only; Rust, Tauri, Node, and separate CLI runtimes
   are intentionally kept out of the active product path.
 
@@ -82,6 +83,30 @@ The panel can show:
 - quick profile switching for saved watched-port profiles
 - kill-unavailable explanations with next-check hints
 - read-only Docker published-port child rows in the Services section
+
+### Port-Change Notifications
+
+`0.6.0` release preparation adds an opt-in local notification for selected
+ports. It is off by default for new and upgraded configurations. On first
+enable, PTK copies the watched expression only when the notification expression
+is empty; the expressions are independent afterward. They share the
+comma-and-range grammar and 5,000-port parser limit, for example
+`3000,5173-5182`, and a port must be in their current intersection to notify.
+
+PTK notifies only reliable open and closed transitions. A unique positive PID
+is reliable even when its process name is unavailable; ambiguous, failed, or
+missing listener evidence never notifies. It does not notify for the initial
+scan, untrusted or transient observations, or identity-only changes. After a
+successful delivery, the same port and direction are suppressed for 10 seconds;
+the opposite direction remains immediate. Notifications have no separate
+history.
+
+Passive permission checks at startup, reactivation, Settings presentation, and
+before delivery never prompt. macOS permission may be requested only after a
+valid enabled configuration is saved while its status is not determined. PTK
+routes blocked permission to macOS Settings. A denied or blocked permission
+does not erase the saved opt-in intent or selected expression. Clicking a
+notification opens the PTK panel only.
 
 ### Service Status
 
@@ -148,6 +173,7 @@ The settings sheet supports:
 - theme selection: system, light, dark
 - persistence through `UserDefaults`
 - quick switching for saved watched-port profiles
+- port-change notifications: opt-in switch, selected-port expression, and macOS permission status
 
 ### Port Presets and Quick Actions
 
@@ -329,14 +355,15 @@ Current test coverage focuses on:
 - Docker published-port parsing and read-only child rows
 - service command timeout handling
 - app view model behavior
+- notification reliable transitions, consent and permission, delivery
+  suppression, and click routing
 
 ## Not In Scope Yet
 
 PTK currently does not provide:
 
-- installer packaging
+- signed PKG installer packaging
 - launch-at-login support
-- notifications
 - Docker container management
 - database health queries
 - remote host scanning

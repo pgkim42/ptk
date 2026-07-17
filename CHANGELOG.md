@@ -2,14 +2,34 @@
 
 All notable PTK changes are tracked here.
 
-## [Unreleased]
+## [0.6.0] — Release preparation
 
-- Continue accessibility, settings-safety, scanner-correctness, and release
-  packaging improvements without weakening process-termination safeguards.
+This line is not released yet; `0.5.0` remains the latest published artifact.
+
+### Port-change notifications
+
+- Prepare opt-in local notifications, disabled by default for new and upgraded
+  configurations. On first enable, copy the watched expression only when the
+  notification expression is empty; afterward the expressions are independent,
+  share the 5,000-port parser limit, and notify only their current intersection.
+- Notify only reliable opened and closed transitions. A unique positive PID may
+  notify without a process name; ambiguous, failed, or missing listener evidence
+  never notifies. Exclude initial, untrusted, transient, and identity-only
+  changes.
+- Suppress the same port and direction for 10 seconds only after successful
+  delivery; allow the opposite direction immediately.
+- Passive permission checks at startup, reactivation, Settings presentation,
+  and before delivery never prompt. Request macOS permission only after saving
+  a valid enabled configuration while status is not determined; route blocked
+  access to macOS Settings and retain saved opt-in intent and port selection.
+- Open the PTK panel only when a notification is clicked, without adding a
+  separate notification history.
+- Preserve the Swift-native runtime and existing fail-closed `SIGTERM`-only
+  process-termination safety model.
 
 ## [0.5.0]
 
-Current Swift-only macOS release line.
+Latest published Swift-only macOS release line.
 
 ### Added
 
