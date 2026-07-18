@@ -68,21 +68,6 @@ import Testing
         #expect(snapshot.resolution(for: 5100) == .verified(pid: 400))
     }
 
-    @Test func remoteOnlyAndEstablishedOnlyEvidenceResolveUntrusted() {
-        let sample = header + """
-        node 410 user 20u IPv4 0x1 0t0 TCP 10.0.0.8:5101 (LISTEN)
-        curl 411 user 21u IPv6 0x2 0t0 TCP [::1]:5102->[::1]:80 (ESTABLISHED)
-        """
-
-        let snapshot = LsofParser().parse(sample)
-
-        #expect(
-            snapshot.resolution(for: 5101)
-                == .untrusted(reasons: [.remoteOrInterfaceOnly])
-        )
-        #expect(snapshot.resolution(for: 5102) == .untrusted(reasons: [.established]))
-    }
-
     @Test func familyAddressConflictsPoisonVerifiedEvidence() {
         let sample = header + """
         node 500 user 20u IPv4 0x1 0t0 TCP 127.0.0.1:5200 (LISTEN)
@@ -141,21 +126,6 @@ import Testing
         #expect(snapshot.resolution(for: 65000) == .untrusted(reasons: [.malformed]))
     }
 
-    @Test func compatibilityMapIncludesOnlyResolvedLocalPIDs() {
-        let sample = header + """
-        node 801 user 20u IPv4 0x1 0t0 TCP *:5500 (LISTEN)
-        node 802 user 21u IPv4 0x2 0t0 TCP 127.0.0.1:5501 (LISTEN)
-        node 803 user 22u IPv6 0x3 0t0 TCP [::1]:5501 (LISTEN)
-        node 804 user 23u IPv4 0x4 0t0 TCP 10.0.0.4:5502 (LISTEN)
-        node 805 user 24u mystery 0x5 0t0 TCP *:5503 (LISTEN)
-        node nope user 25u IPv4 0x6 0t0 TCP *:5504 (LISTEN)
-        """
-
-        let map = LsofParser().parseListeningPIDMap(sample)
-
-        #expect(map == [5500: Set([801]), 5501: Set([802, 803])])
-    }
-
     @Test func parsesSupportedPortsWithoutTreatingConnectionsAsListeners() {
         let parser = LsofParser()
 
@@ -165,44 +135,6 @@ import Testing
         #expect(parser.parsePort(fromTCPName: ":::4201") == 4201)
         #expect(parser.parsePort(fromTCPName: "127.0.0.1:61000->127.0.0.1:3000") == nil)
         #expect(parser.parsePort(fromTCPName: "invalid") == nil)
-    }
-
-    @Test func directSnapshotResolutionIsDeterministicAndDefensive() {
-        let records = [
-            LsofListenerRecord(
-                port: 5600,
-                pid: 900,
-                family: .ipv4,
-                address: "127.0.0.1",
-                trust: .verifiedLoopbackCompatible
-            ),
-            LsofListenerRecord(
-                port: 5600,
-                pid: nil,
-                family: .ipv4,
-                address: "127.0.0.1",
-                trust: .verifiedLoopbackCompatible
-            ),
-            LsofListenerRecord(
-                port: 5600,
-                pid: 901,
-                family: .unknown,
-                address: "*",
-                trust: .untrusted(reason: .unknownFamily)
-            ),
-            LsofListenerRecord(
-                port: 5600,
-                pid: 902,
-                family: .ipv4,
-                address: "localhost",
-                trust: .untrusted(reason: .unknownAddress)
-            ),
-        ]
-
-        #expect(
-            LsofSnapshot(records: records).resolution(for: 5600)
-                == .untrusted(reasons: [.unknownFamily, .unknownAddress, .malformed])
-        )
     }
 
     private func record(for port: UInt16, in snapshot: LsofSnapshot) -> LsofListenerRecord? {

@@ -119,8 +119,6 @@ final class MenuBarController: NSObject {
     private var isStopped = false
     private let notificationCoordinator: PortChangeNotificationCoordinator
     private weak var notificationResponseHandler: (any PortChangeNotificationResponseHandling)?
-    private let notificationPanelPresentationForTesting: (@MainActor () -> Void)?
-    private let refreshWorkSettlementForTesting: (@MainActor () -> Void)?
     private var watchedEpoch: UInt64 = 0
     private(set) var lastRefreshTriggerForTesting: RefreshTrigger?
     static let quietRefreshCadence: TimeInterval = 30
@@ -155,10 +153,6 @@ final class MenuBarController: NSObject {
     private struct KillOperation {
         let id: UUID
         let task: Task<String?, Never>
-    }
-
-    var nextGenerationForTesting: Int {
-        nextGeneration
     }
 
     var newestRequestedGenerationForTesting: Int? {
@@ -201,9 +195,7 @@ final class MenuBarController: NSObject {
         notificationPermission: (any PortChangeNotificationPermissionProviding)? = nil,
         notificationDelivery: (any PortChangeNotificationDelivering)? = nil,
         notificationResponseHandler: (any PortChangeNotificationResponseHandling)? = nil,
-        notificationClock: (any PortChangeNotificationClock)? = nil,
-        notificationPanelPresentationForTesting: (@MainActor () -> Void)? = nil,
-        refreshWorkSettlementForTesting: (@MainActor () -> Void)? = nil
+        notificationClock: (any PortChangeNotificationClock)? = nil
     ) {
         self.settings = settings
         self.parser = parser
@@ -244,8 +236,6 @@ final class MenuBarController: NSObject {
             eligibility: SettingsNotificationEligibility(settings: settings, parser: parser)
         )
         self.notificationResponseHandler = notificationResponseHandler
-        self.notificationPanelPresentationForTesting = notificationPanelPresentationForTesting
-        self.refreshWorkSettlementForTesting = refreshWorkSettlementForTesting
 
         super.init()
         self.refreshScheduler = RefreshScheduler(interval: settings.refreshInterval) { [weak self] trigger, completion in
@@ -486,16 +476,6 @@ final class MenuBarController: NSObject {
         button.setAccessibilityLabel(content.accessibilityLabel)
     }
 
-    var menuBarButtonStateForTesting: MenuBarButtonState? {
-        guard let button = statusItem?.button else { return nil }
-        return MenuBarButtonState(
-            title: button.title,
-            hasImage: button.image != nil,
-            toolTip: button.toolTip,
-            accessibilityLabel: button.accessibilityLabel()
-        )
-    }
-
     @objc func togglePopover(_ sender: Any?) {
         guard let button = statusItem?.button else { return }
 
@@ -535,10 +515,6 @@ final class MenuBarController: NSObject {
     }
     func showPanelFromNotification() {
         guard !isStopped else { return }
-        if let notificationPanelPresentationForTesting {
-            notificationPanelPresentationForTesting()
-            return
-        }
         guard let panel else { return }
         if panel.isVisible {
             panel.makeKeyAndOrderFront(nil)
@@ -568,14 +544,6 @@ final class MenuBarController: NSObject {
         )
     }
 
-    func applyPanelClosedForTesting() {
-        applyQuietCadence()
-    }
-
-    func applyPanelOpenedForTesting() {
-        applyNormalCadence(triggerRefresh: true)
-    }
-
     private func applyCurrentPanelCadence() {
         if isPanelVisible {
             applyNormalCadence(triggerRefresh: false)
@@ -598,10 +566,6 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func timerFired(_ timer: Timer) {
-        refreshScheduler?.triggerTimerRefresh()
-    }
-
-    func fireTimerForTesting() {
         refreshScheduler?.triggerTimerRefresh()
     }
 
@@ -714,7 +678,6 @@ final class MenuBarController: NSObject {
     }
 
     private func settlePortBranch(generation: Int, statuses: [PortStatus]) {
-        refreshWorkSettlementForTesting?()
         guard canSettle(generation: generation, branch: .port) else { return }
         if canPublish(generation: generation) {
             trackPortChanges(statuses)
@@ -734,7 +697,6 @@ final class MenuBarController: NSObject {
     }
 
     private func settlePortBranch(generation: Int, errorMessage: String) {
-        refreshWorkSettlementForTesting?()
         guard canSettle(generation: generation, branch: .port) else { return }
         if canPublish(generation: generation) {
             portErrorMessage = errorMessage
@@ -744,7 +706,6 @@ final class MenuBarController: NSObject {
     }
 
     private func settleServiceBranch(generation: Int, snapshot: ServiceSnapshot) {
-        refreshWorkSettlementForTesting?()
         guard canSettle(generation: generation, branch: .service) else { return }
         if canPublish(generation: generation) {
             serviceStatuses = snapshot.statuses
@@ -756,7 +717,6 @@ final class MenuBarController: NSObject {
     }
 
     private func settleServiceBranch(generation: Int, errorMessage: String) {
-        refreshWorkSettlementForTesting?()
         guard canSettle(generation: generation, branch: .service) else { return }
         if canPublish(generation: generation) {
             serviceErrorMessage = errorMessage
@@ -882,13 +842,6 @@ private final class PTKPanel: NSPanel {
         super.orderOut(sender)
         onOrderOut?()
     }
-}
-
-struct MenuBarButtonState: Equatable {
-    let title: String
-    let hasImage: Bool
-    let toolTip: String?
-    let accessibilityLabel: String?
 }
 
 private extension String {

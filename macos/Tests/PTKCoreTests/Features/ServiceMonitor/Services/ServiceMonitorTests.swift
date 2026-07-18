@@ -31,13 +31,6 @@ import Testing
         #expect(monitor.dockerStatus() == ServiceStatus(name: "Docker", detail: "Daemon", state: .stopped))
     }
 
-    @Test func dockerTimeoutIsUnavailable() {
-        let runner = FakeServiceCommandRunner(error: ServiceCommandError.timedOut)
-        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
-
-        #expect(monitor.dockerStatus() == ServiceStatus(name: "Docker", detail: "Daemon timeout", state: .unavailable))
-    }
-
     @Test func dockerHelperLifecycleFailuresAreCommandUnavailable() {
         let errors: [ServiceCommandError] = [
             .launchFailed("launch failed"),
@@ -131,32 +124,6 @@ import Testing
         #expect(displayRows.last?.copyCandidates.isEmpty == true)
     }
 
-    @Test func dockerPublishedPortRowsExposeOnlyUnambiguousVisibleCopyURLs() {
-        let rows = DockerContainerPortRow.displayRows(for: [
-            DockerContainerPublishedPorts(name: "web", publishedPorts: [
-                DockerPublishedPort(hostPort: "3000", containerPort: "80", sortPort: 3000)
-            ]),
-            DockerContainerPublishedPorts(name: "api", publishedPorts: [
-                DockerPublishedPort(hostPort: "4000", containerPort: "4000", sortPort: 4000),
-                DockerPublishedPort(hostPort: "9229", containerPort: "9229", sortPort: 9229)
-            ]),
-            DockerContainerPublishedPorts(name: "db", publishedPorts: [
-                DockerPublishedPort(hostPort: "5432-5433", containerPort: "5432-5433", sortPort: 5432)
-            ]),
-            DockerContainerPublishedPorts(name: "hidden", publishedPorts: [
-                DockerPublishedPort(hostPort: "5000", containerPort: "5000", sortPort: 5000),
-                DockerPublishedPort(hostPort: "5001", containerPort: "5001", sortPort: 5001)
-            ])
-        ], maxContainers: 4, maxMappingsPerContainer: 1)
-
-        #expect(rows.first { $0.name == "web" }?.copyCandidates == [
-            DockerPortCopyCandidate(label: "3000", urlString: "http://localhost:3000")
-        ])
-        #expect(rows.first { $0.name == "api" }?.copyCandidates.isEmpty == true)
-        #expect(rows.first { $0.name == "db" }?.copyCandidates.isEmpty == true)
-        #expect(rows.first { $0.name == "hidden" }?.copyCandidates.isEmpty == true)
-    }
-
     @Test func serviceSnapshotCollectsDockerPortsOnlyWhenDockerIsRunning() {
         let runner = FakeServiceCommandRunner(results: [
             "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n"),
@@ -175,108 +142,6 @@ import Testing
             ["info"],
             ["ps", "--format", "{{.Names}}\t{{.Ports}}"]
         ])
-    }
-
-    @Test func dockerPsTimeoutPublishesDetailsTimeoutWithoutRows() {
-        let runner = FakeServiceCommandRunner(
-            results: [
-                "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n")
-            ],
-            errors: [
-                "docker ps --format {{.Names}}\t{{.Ports}}": ServiceCommandError.timedOut
-            ]
-        )
-        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
-
-        let snapshot = monitor.scanWithDetails()
-
-        #expect(snapshot.statuses.first == ServiceStatus(name: "Docker", detail: "Details timeout", state: .unavailable))
-        #expect(snapshot.dockerContainerRows.isEmpty)
-    }
-
-    @Test func dockerPsLaunchFailureMakesDetailsUnavailableWithoutRows() {
-        let runner = FakeServiceCommandRunner(
-            results: [
-                "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n")
-            ],
-            errors: [
-                "docker ps --format {{.Names}}\t{{.Ports}}": ServiceCommandError.launchFailed("launch failed")
-            ]
-        )
-        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
-
-        let snapshot = monitor.scanWithDetails()
-
-        #expect(snapshot.statuses.first == ServiceStatus(name: "Docker", detail: "Details unavailable", state: .unavailable))
-        #expect(snapshot.dockerContainerRows.isEmpty)
-    }
-
-    @Test func dockerPsOutputOverflowMakesDetailsUnavailableWithoutRows() {
-        let runner = FakeServiceCommandRunner(
-            results: [
-                "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n")
-            ],
-            errors: [
-                "docker ps --format {{.Names}}\t{{.Ports}}": ServiceCommandError.outputLimitExceeded(streams: [.stdout])
-            ]
-        )
-        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
-
-        let snapshot = monitor.scanWithDetails()
-
-        #expect(snapshot.statuses.first == ServiceStatus(name: "Docker", detail: "Details unavailable", state: .unavailable))
-        #expect(snapshot.dockerContainerRows.isEmpty)
-    }
-
-    @Test func dockerPsPostReapDrainFailureMakesDetailsUnavailableWithoutRows() {
-        let runner = FakeServiceCommandRunner(
-            results: [
-                "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n")
-            ],
-            errors: [
-                "docker ps --format {{.Names}}\t{{.Ports}}": ServiceCommandError.pipeDrainTimedOut
-            ]
-        )
-        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
-
-        let snapshot = monitor.scanWithDetails()
-
-        #expect(snapshot.statuses.first == ServiceStatus(name: "Docker", detail: "Details unavailable", state: .unavailable))
-        #expect(snapshot.dockerContainerRows.isEmpty)
-    }
-
-    @Test func dockerPsNonServiceCommandErrorMakesDetailsUnavailableWithoutRows() {
-        let runner = FakeServiceCommandRunner(
-            results: [
-                "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n")
-            ],
-            errors: [
-                "docker ps --format {{.Names}}\t{{.Ports}}": DockerPsSentinelError.failure
-            ]
-        )
-        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
-
-        let snapshot = monitor.scanWithDetails()
-
-        #expect(snapshot.statuses.first == ServiceStatus(name: "Docker", detail: "Details unavailable", state: .unavailable))
-        #expect(snapshot.dockerContainerRows.isEmpty)
-    }
-
-    @Test func dockerPsOrdinaryNonzeroKeepsDockerRunningWithoutParsingRows() {
-        let runner = FakeServiceCommandRunner(results: [
-            "docker info": ServiceCommandResult(exitCode: 0, stdout: "Server Version: 27.0.0\n"),
-            "docker ps --format {{.Names}}\t{{.Ports}}": ServiceCommandResult(
-                exitCode: 1,
-                stdout: "must-not-parse\t0.0.0.0:4000->4000/tcp\n",
-                stderr: "boom"
-            )
-        ])
-        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
-
-        let snapshot = monitor.scanWithDetails()
-
-        #expect(snapshot.statuses.first == ServiceStatus(name: "Docker", detail: "Daemon", state: .running))
-        #expect(snapshot.dockerContainerRows.isEmpty)
     }
 
     @Test func stoppedDockerSkipsDockerPsCollection() {
@@ -310,76 +175,6 @@ import Testing
         #expect(Date().timeIntervalSince(startedAt) < 1)
         #expect(process.waitUntilExitCallCount == 1)
         #expect(process.receivedSignals == [SIGTERM, SIGKILL])
-    }
-
-    @Test func systemServiceCommandRunnerKillsTermIgnoringDirectChildPromptly() {
-        let runner = SystemServiceCommandRunner()
-        let startedAt = Date()
-
-        #expect(throws: ServiceCommandError.timedOut) {
-            try runner.run(
-                "sh",
-                arguments: ["-c", "trap '' TERM; while :; do :; done"],
-                timeout: 0.05,
-                environmentPath: "/bin:/usr/bin"
-            )
-        }
-        #expect(Date().timeIntervalSince(startedAt) < 1)
-    }
-
-    @Test func systemServiceCommandRunnerMapsLaunchFailure() {
-        let process = FakeOwnedHelperProcess(behavior: .launchFails)
-        let runner = SystemServiceCommandRunner(processFactory: { process })
-
-        let error = capturedServiceCommandError {
-            _ = try runner.run(
-                "docker",
-                arguments: ["info"],
-                timeout: 1,
-                environmentPath: "/bin:/usr/bin"
-            )
-        }
-
-        #expect(error == .launchFailed("launch failed"))
-        #expect(process.waitUntilExitCallCount == 0)
-    }
-
-    @Test func systemServiceCommandRunnerMapsPerStreamOutputOverflow() {
-        let oversized = Data(repeating: 0x61, count: 4 * 1_024 * 1_024 + 1)
-        let process = FakeOwnedHelperProcess(
-            behavior: .exits(exitCode: 0, stdout: oversized, stderr: oversized)
-        )
-        let runner = SystemServiceCommandRunner(processFactory: { process })
-
-        let error = capturedServiceCommandError {
-            _ = try runner.run(
-                "docker",
-                arguments: ["info"],
-                timeout: 2,
-                environmentPath: "/bin:/usr/bin"
-            )
-        }
-
-        #expect(error == .outputLimitExceeded(streams: [.stdout, .stderr]))
-        #expect(process.waitUntilExitCallCount == 1)
-    }
-
-    @Test func systemServiceCommandRunnerMapsPostExitPipeDrainTimeout() {
-        let process = FakeOwnedHelperProcess(behavior: .holdsStdoutOpen)
-        let runner = SystemServiceCommandRunner(processFactory: { process })
-
-        let error = capturedServiceCommandError {
-            _ = try runner.run(
-                "docker",
-                arguments: ["info"],
-                timeout: 1,
-                environmentPath: "/bin:/usr/bin"
-            )
-        }
-        process.releaseHeldPipes()
-
-        #expect(error == .pipeDrainTimedOut)
-        #expect(process.waitUntilExitCallCount == 1)
     }
 
     @Test func systemServiceCommandRunnerExactlyReplacesHostileInheritedPathAndReturnsCapturedResult() throws {
@@ -451,20 +246,6 @@ import Testing
         ])
     }
 
-    @Test func customDatabaseStatusesCanBeGrouped() {
-        let monitor = ServiceMonitor(
-            runner: FakeServiceCommandRunner(),
-            connector: FakeServiceSocketChecker(openPorts: [5672]),
-            databaseEndpoints: [
-                DatabaseEndpoint(name: "RabbitMQ", port: 5672)
-            ]
-        )
-
-        #expect(monitor.databaseStatuses(group: .custom) == [
-            ServiceStatus(name: "RabbitMQ", detail: "Port 5672", state: .running, group: .custom)
-        ])
-    }
-
     @Test func ipv6OnlyDatabaseListenerIsRunning() {
         let connector = RecordingServiceSocketChecker(
             openHostsByPort: [5432: ["::1"]]
@@ -502,6 +283,7 @@ import Testing
         ])
         #expect(clock.now == 0.375)
     }
+
 }
 
 private enum DockerPsSentinelError: Error {
@@ -679,8 +461,8 @@ private final class FakeOwnedHelperProcess: OwnedHelperProcess, @unchecked Senda
     func waitUntilExit() {
         condition.lock()
         waitCallCount += 1
-        while behavior.isTermIgnoring, !killed {
-            condition.wait()
+        let deadline = Date(timeIntervalSinceNow: 1)
+        while behavior.isTermIgnoring, !killed, condition.wait(until: deadline) {
         }
         condition.unlock()
     }

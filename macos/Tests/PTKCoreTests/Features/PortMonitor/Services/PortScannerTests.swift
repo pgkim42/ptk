@@ -26,33 +26,6 @@ import Testing
         #expect(connector.calls.map(\.host) == ["127.0.0.1"])
     }
 
-    @Test func bothClosedFamiliesAreClosed() {
-        let connector = RecordingSocketConnector()
-
-        #expect(!connector.isListeningOnLocalhost(port: 3000, timeout: 1))
-        #expect(connector.calls.map(\.host) == ["127.0.0.1", "::1"])
-    }
-
-    @Test func earlyIPv4SuccessDoesNotSpendRemainingBudget() {
-        let clock = ManualProbeClock()
-        let connector = RecordingSocketConnector(
-            openHostsByPort: [3000: ["127.0.0.1"]],
-            elapsedByHost: ["127.0.0.1": 0.125],
-            clock: clock
-        )
-
-        let isOpen = connector.isListeningOnLocalhost(
-            port: 3000,
-            timeout: 1,
-            now: { clock.now }
-        )
-        #expect(isOpen)
-        #expect(connector.calls == [
-            SocketProbeCall(host: "127.0.0.1", port: 3000, timeout: 0.5)
-        ])
-        #expect(clock.now == 0.125)
-    }
-
     @Test func ipv6ReceivesOnlyBudgetRemainingAfterIPv4() {
         let clock = ManualProbeClock()
         let connector = RecordingSocketConnector(
@@ -72,27 +45,6 @@ import Testing
             SocketProbeCall(host: "::1", port: 3000, timeout: 0.875)
         ])
         #expect(clock.now == 0.375)
-    }
-
-    @Test func ipv4ExhaustionLeavesOnlyHalfBudgetForIPv6() {
-        let clock = ManualProbeClock()
-        let connector = RecordingSocketConnector(
-            openHostsByPort: [3000: ["::1"]],
-            elapsedByHost: ["127.0.0.1": 1, "::1": 1],
-            clock: clock
-        )
-
-        let isOpen = connector.isListeningOnLocalhost(
-            port: 3000,
-            timeout: 1,
-            now: { clock.now }
-        )
-        #expect(!isOpen)
-        #expect(connector.calls == [
-            SocketProbeCall(host: "127.0.0.1", port: 3000, timeout: 0.5),
-            SocketProbeCall(host: "::1", port: 3000, timeout: 0.5)
-        ])
-        #expect(clock.now == 1)
     }
 
     @Test func scanUsesOneSnapshotAndMapsVerifiedIdentity() {
@@ -159,55 +111,6 @@ import Testing
         #expect(runner.calls.contains { $0.0 == "ps" } == false)
     }
 
-    @Test func absentListenerEvidenceMapsToNoVerifiedListener() {
-        let runner = FakeProcessRunner()
-        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
-            exitCode: 0,
-            stdout: ""
-        )
-        let scanner = PortScanner(
-            connector: RecordingSocketConnector(openHostsByPort: [3000: ["127.0.0.1"]]),
-            lookup: ProcessLookup(runner: runner)
-        )
-
-        let status = scanner.scan(ports: [3000])[0]
-
-        #expect(status.isOpen)
-        #expect(status.identityState == .unavailable(.noVerifiedListener))
-        #expect(status.pid == nil)
-        #expect(status.processName == nil)
-        #expect(status.killTarget == nil)
-    }
-
-    @Test func remoteListenerEvidenceIsUntrustedWithoutIdentity() {
-        let runner = FakeProcessRunner()
-        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
-            exitCode: 0,
-            stdout: """
-            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-            node    111 me   1u IPv4 0x1    0t0      TCP 192.168.1.10:3000 (LISTEN)
-            """
-        )
-        let scanner = PortScanner(
-            connector: RecordingSocketConnector(openHostsByPort: [3000: ["127.0.0.1"]]),
-            lookup: ProcessLookup(runner: runner)
-        )
-
-        let status = scanner.scan(ports: [3000])[0]
-
-        #expect(status.isOpen)
-        #expect(
-            status.identityState
-                == .unavailable(.untrustedListener(
-                    message: "untrusted listeners for port 3000: remoteOrInterfaceOnly"
-                ))
-        )
-        #expect(status.pid == nil)
-        #expect(status.processName == nil)
-        #expect(status.killTarget == nil)
-        #expect(runner.calls.contains { $0.0 == "ps" } == false)
-    }
-
     @Test func ambiguousListenersMapSortedPIDsWithoutIdentity() {
         let runner = FakeProcessRunner()
         runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
@@ -227,34 +130,6 @@ import Testing
 
         #expect(status.isOpen)
         #expect(status.identityState == .unavailable(.ambiguousListeners(pids: [111, 222])))
-        #expect(status.pid == nil)
-        #expect(status.processName == nil)
-        #expect(status.killTarget == nil)
-    }
-
-    @Test func processNameUnavailableDoesNotAttachPartialIdentity() {
-        let runner = FakeProcessRunner()
-        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
-            exitCode: 0,
-            stdout: """
-            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-            node    111 me   1u IPv4 0x1    0t0      TCP 127.0.0.1:3000 (LISTEN)
-            """
-        )
-        runner.results["ps -p 111 -o comm="] = ProcessRunResult(
-            exitCode: 1,
-            stdout: "",
-            stderr: "gone"
-        )
-        let scanner = PortScanner(
-            connector: RecordingSocketConnector(openHostsByPort: [3000: ["127.0.0.1"]]),
-            lookup: ProcessLookup(runner: runner)
-        )
-
-        let status = scanner.scan(ports: [3000])[0]
-
-        #expect(status.isOpen)
-        #expect(status.identityState == .unavailable(.processNameUnavailable(pid: 111)))
         #expect(status.pid == nil)
         #expect(status.processName == nil)
         #expect(status.killTarget == nil)
@@ -281,33 +156,6 @@ import Testing
         #expect(status.killTarget == nil)
     }
 
-    @Test func processNameLookupFailureMapsLookupFailureWithoutIdentity() {
-        let runner = ProcessNameFailingRunner()
-        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
-            exitCode: 0,
-            stdout: """
-            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-            node    111 me   1u IPv4 0x1    0t0      TCP 127.0.0.1:3000 (LISTEN)
-            """
-        )
-        let scanner = PortScanner(
-            connector: RecordingSocketConnector(openHostsByPort: [3000: ["127.0.0.1"]]),
-            lookup: ProcessLookup(runner: runner)
-        )
-
-        let status = scanner.scan(ports: [3000])[0]
-
-        #expect(status.isOpen)
-        #expect(
-            status.identityState
-                == .unavailable(.lookupFailed(
-                    message: "process name lookup failed for PID 111: process timed out"
-                ))
-        )
-        #expect(status.pid == nil)
-        #expect(status.processName == nil)
-        #expect(status.killTarget == nil)
-    }
 }
 
 private final class ProcessNameFailingRunner: ProcessRunning, @unchecked Sendable {

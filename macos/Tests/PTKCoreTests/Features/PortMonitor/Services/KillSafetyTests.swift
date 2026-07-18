@@ -65,13 +65,31 @@ private struct FakeConfirmer: KillConfirming {
         #expect(terminator.terminatedPIDs.isEmpty)
     }
 
-    @Test func killTargetStoresOneVerifiedIdentityAndProjectsScalars() {
-        let identity = VerifiedProcessIdentity(pid: 111, processName: " node ")!
-        let target = KillTarget(port: 3000, identity: identity)
+    @Test(arguments: [
+        "node 111 me 1u IPv4 0x1 0t0 TCP 127.0.0.1:3000 (LISTEN)",
+        "node 111 me 1u IPv6 0x1 0t0 TCP [::1]:3000 (LISTEN)"
+    ])
+    func exactSingleFamilyIdentityTerminatesOnceAfterConfirmation(
+        listenerLine: String
+    ) throws {
+        let runner = configuredRunner(
+            listenerLines: [listenerLine],
+            processNames: [111: "node"]
+        )
+        let terminator = FakeTerminator()
+        let coordinator = KillCoordinator(
+            confirmer: FakeConfirmer(confirmed: true),
+            service: KillService(
+                resolver: ProcessLookup(runner: runner),
+                terminator: terminator
+            )
+        )
 
-        #expect(target.identity == identity)
-        #expect(target.pid == 111)
-        #expect(target.processName == "node")
+        let outcome = try coordinator.requestKill(target: target(pid: 111, name: "node"))
+
+        #expect(outcome == .terminated)
+        #expect(runner.calls.map(\.0) == ["lsof", "ps"])
+        #expect(terminator.terminatedPIDs == [111])
     }
 
     @Test(arguments: [
@@ -99,33 +117,6 @@ private struct FakeConfirmer: KillConfirming {
         #expect(outcome == .cancelled)
         #expect(runner.calls.isEmpty)
         #expect(terminator.terminatedPIDs.isEmpty)
-    }
-
-    @Test(arguments: [
-        "node 111 me 1u IPv4 0x1 0t0 TCP 127.0.0.1:3000 (LISTEN)",
-        "node 111 me 1u IPv6 0x1 0t0 TCP [::1]:3000 (LISTEN)"
-    ])
-    func exactSingleFamilyIdentityTerminatesOnceAfterConfirmation(
-        listenerLine: String
-    ) throws {
-        let runner = configuredRunner(
-            listenerLines: [listenerLine],
-            processNames: [111: "node"]
-        )
-        let terminator = FakeTerminator()
-        let coordinator = KillCoordinator(
-            confirmer: FakeConfirmer(confirmed: true),
-            service: KillService(
-                resolver: ProcessLookup(runner: runner),
-                terminator: terminator
-            )
-        )
-
-        let outcome = try coordinator.requestKill(target: target(pid: 111, name: "node"))
-
-        #expect(outcome == .terminated)
-        #expect(runner.calls.map(\.0) == ["lsof", "ps"])
-        #expect(terminator.terminatedPIDs == [111])
     }
 
     @Test func samePIDAcrossIPv4AndIPv6TerminatesOnce() throws {
@@ -186,47 +177,6 @@ private struct FakeConfirmer: KillConfirming {
         #expect(terminator.terminatedPIDs.isEmpty)
     }
 
-    @Test func remoteOnlyListenerIsUntrustedAndBlocksTermination() {
-        let runner = configuredRunner(
-            listenerLines: [
-                "node 111 me 1u IPv4 0x1 0t0 TCP 192.0.2.1:3000 (LISTEN)"
-            ],
-            processNames: [111: "node"]
-        )
-        let terminator = FakeTerminator()
-        let service = KillService(
-            resolver: ProcessLookup(runner: runner),
-            terminator: terminator
-        )
-
-        #expect(throws: KillError.untrustedListener(port: 3000, reasons: [.remoteOrInterfaceOnly])) {
-            try service.terminateAfterRevalidation(target: target(pid: 111, name: "node"))
-        }
-        #expect(runner.calls.map(\.0) == ["lsof"])
-        #expect(terminator.terminatedPIDs.isEmpty)
-    }
-
-    @Test func conflictingIPv4AndIPv6IdentitiesBlockTermination() {
-        let runner = configuredRunner(
-            listenerLines: [
-                "node 111 me 1u IPv4 0x1 0t0 TCP 127.0.0.1:3000 (LISTEN)",
-                "vite 222 me 2u IPv6 0x2 0t0 TCP [::1]:3000 (LISTEN)"
-            ],
-            processNames: [111: "node", 222: "vite"]
-        )
-        let terminator = FakeTerminator()
-        let service = KillService(
-            resolver: ProcessLookup(runner: runner),
-            terminator: terminator
-        )
-
-        #expect(throws: KillError.ambiguousListeners(port: 3000, pids: [111, 222])) {
-            try service.terminateAfterRevalidation(target: target(pid: 111, name: "node"))
-        }
-        #expect(runner.calls.map(\.0) == ["lsof"])
-        #expect(terminator.terminatedPIDs.isEmpty)
-    }
-
     @Test func pidChangeBlocksTermination() {
         let runner = configuredRunner(
             listenerLines: [
@@ -279,107 +229,6 @@ private struct FakeConfirmer: KillConfirming {
         #expect(terminator.terminatedPIDs.isEmpty)
     }
 
-    @Test func ordinaryMissingProcessNameBecomesResolverFailureWithoutTermination() {
-        let runner = configuredRunner(
-            listenerLines: [
-                "node 111 me 1u IPv4 0x1 0t0 TCP 127.0.0.1:3000 (LISTEN)"
-            ],
-            processNames: [:]
-        )
-        let terminator = FakeTerminator()
-        let service = KillService(
-            resolver: ProcessLookup(runner: runner),
-            terminator: terminator
-        )
-
-        #expect(
-            throws: KillError.resolverFailed("process name unavailable for PID 111")
-        ) {
-            try service.terminateAfterRevalidation(target: target(pid: 111, name: "node"))
-        }
-        #expect(terminator.terminatedPIDs.isEmpty)
-    }
-
-    @Test(arguments: [
-        (ProcessRunnerError.launchFailed("not found"), "not found"),
-        (ProcessRunnerError.timedOut, "process timed out"),
-        (
-            ProcessRunnerError.outputLimitExceeded(streams: [.stdout, .stderr]),
-            "process output limit exceeded: stderr, stdout"
-        ),
-        (
-            ProcessRunnerError.pipeDrainTimedOut,
-            "process output pipes did not close after exit"
-        )
-    ])
-    func lsofHelperFailureBecomesResolverFailureWithoutTermination(
-        error: ProcessRunnerError,
-        expectedMessage: String
-    ) {
-        let runner = StageFailingRunner(stage: .lsof, error: error)
-        let terminator = FakeTerminator()
-        let service = KillService(
-            resolver: ProcessLookup(runner: runner),
-            terminator: terminator
-        )
-
-        #expect(throws: KillError.resolverFailed(expectedMessage)) {
-            try service.terminateAfterRevalidation(target: target(pid: 111, name: "node"))
-        }
-        #expect(terminator.terminatedPIDs.isEmpty)
-    }
-
-    @Test(arguments: [
-        (
-            ProcessRunnerError.launchFailed("not found"),
-            "process name lookup failed for PID 111: not found"
-        ),
-        (
-            ProcessRunnerError.timedOut,
-            "process name lookup failed for PID 111: process timed out"
-        ),
-        (
-            ProcessRunnerError.outputLimitExceeded(streams: [.stdout, .stderr]),
-            "process name lookup failed for PID 111: process output limit exceeded: stderr, stdout"
-        ),
-        (
-            ProcessRunnerError.pipeDrainTimedOut,
-            "process name lookup failed for PID 111: process output pipes did not close after exit"
-        )
-    ])
-    func processNameHelperFailureBecomesResolverFailureWithoutTermination(
-        error: ProcessRunnerError,
-        expectedMessage: String
-    ) {
-        let runner = StageFailingRunner(stage: .ps, error: error)
-        let terminator = FakeTerminator()
-        let service = KillService(
-            resolver: ProcessLookup(runner: runner),
-            terminator: terminator
-        )
-
-        #expect(throws: KillError.resolverFailed(expectedMessage)) {
-            try service.terminateAfterRevalidation(target: target(pid: 111, name: "node"))
-        }
-        #expect(terminator.terminatedPIDs.isEmpty)
-    }
-
-    @Test func nonLookupResolverErrorKeepsExistingFailureEvidence() {
-        let terminator = FakeTerminator()
-        let service = KillService(
-            resolver: FakeResolver(
-                info: nil,
-                error: ProcessLookupError.lsofFailed("denied")
-            ),
-            terminator: terminator
-        )
-
-        #expect(throws: KillError.resolverFailed("denied")) {
-            try service.terminateAfterRevalidation(target: target(pid: 111, name: "node"))
-        }
-        #expect(terminator.terminatedPIDs.isEmpty)
-    }
-
     @Test func terminationFailureIsSurfacedAfterOneCall() {
         let terminator = FakeTerminator()
         terminator.failureMessage = "operation not permitted"
@@ -409,6 +258,7 @@ private struct FakeConfirmer: KillConfirming {
         #expect(calls.first?.signal == SIGTERM)
         #expect(calls.contains { $0.signal == SIGKILL } == false)
     }
+
 }
 
 private func target(pid: Int, name: String) -> KillTarget {

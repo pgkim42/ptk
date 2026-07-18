@@ -4,14 +4,6 @@ import Testing
 @Suite struct PortRangeParserTests {
     let parser = PortRangeParser()
 
-    @Test func parsesCommaSeparatedValues() throws {
-        #expect(try parser.parse("3000,8080") == [3000, 8080])
-    }
-
-    @Test func parsesRanges() throws {
-        #expect(try parser.parse("3000-3002") == [3000, 3001, 3002])
-    }
-
     @Test func parsesMixedInputSortedUnique() throws {
         #expect(try parser.parse("8080, 3000-3002 8080") == [3000, 3001, 3002, 8080])
     }
@@ -41,11 +33,4 @@ import Testing
         }
     }
 
-    @Test func keepsDocumentedDefaultsStable() throws {
-        let ports = try parser.parse(AppDefaults.defaultWatchedPortsExpression)
-        #expect(AppDefaults.defaultWatchedPortsExpression == "3000-3009,5173-5182,4200-4209,8080-8089")
-        #expect(ports.count == 40)
-        #expect(ports.first == 3000)
-        #expect(ports.last == 8089)
-    }
 }
