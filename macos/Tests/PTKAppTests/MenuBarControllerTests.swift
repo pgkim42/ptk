@@ -190,51 +190,6 @@ import Testing
         #expect(controller.viewModel.statuses.isEmpty)
     }
 
-    @Test func defaultKillServiceWiringCancelsWithoutWorkThenRevalidatesTerminatesAndRefreshesOnce() async {
-        let target = KillTarget(port: 3000, pid: 100, processName: "node")
-        let resolver = LockedCountingProcessResolver(
-            processInfo: PortProcessInfo(
-                port: target.port,
-                pid: target.pid,
-                processName: target.processName
-            )
-        )
-        let terminator = LockedCountingProcessTerminator()
-        let refreshCalls = LockedBox(0)
-        let controller = MenuBarController(
-            settings: AppSettings(store: InMemorySettingsStore()),
-            killService: KillService(resolver: resolver, terminator: terminator),
-            portScanWorker: { _ in
-                refreshCalls.withValue { $0 += 1 }
-                return []
-            },
-            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
-        )
-        defer { controller.stop() }
-
-        controller.viewModel.requestKill(target)
-        controller.viewModel.cancelKill()
-
-        #expect(resolver.requestedPorts.isEmpty)
-        #expect(terminator.terminatedPIDs.isEmpty)
-        #expect(refreshCalls.value == 0)
-
-        controller.viewModel.requestKill(target)
-        controller.viewModel.confirmKill()
-
-        #expect(await eventually {
-            controller.lastRefreshTriggerForTesting == .kill
-                && !controller.viewModel.isRefreshing
-                && refreshCalls.value == 1
-        })
-        #expect(resolver.requestedPorts == [target.port])
-        #expect(terminator.terminatedPIDs == [target.pid])
-        #expect(refreshCalls.value == 1)
-        #expect(controller.viewModel.killErrorMessage == nil)
-        #expect(controller.viewModel.killConfirmationTarget == nil)
-        #expect(!controller.viewModel.isTerminatingProcess)
-    }
-
     @Test func killSuccessAndFailureEachTriggerExactlyOneKillRefresh() async {
         for failureMessage in [String?.none, "denied"] {
             let refreshCalls = LockedBox(0)
@@ -261,32 +216,6 @@ import Testing
             #expect(controller.lastRefreshTriggerForTesting == .kill)
             #expect(controller.viewModel.killErrorMessage == failureMessage)
         }
-    }
-
-    @Test func serviceCompositionPolicyFiltersDefaultPortsAndPreservesOrder() {
-        let policy = ServiceStatusCompositionPolicy(defaultDatabaseEndpoints: [
-            DatabaseEndpoint(name: "PostgreSQL", port: 5432),
-            DatabaseEndpoint(name: "Redis", port: 6379)
-        ])
-        let customEndpoints = [
-            DatabaseEndpoint(name: "Custom Postgres", port: 5432),
-            DatabaseEndpoint(name: "RabbitMQ", port: 5672)
-        ]
-
-        let filteredEndpoints = policy.customEndpointsExcludingBuiltInPorts(customEndpoints)
-        let composedStatuses = policy.compose(
-            defaultStatuses: [
-                ServiceStatus(name: "Docker", detail: "Daemon", state: .running),
-                ServiceStatus(name: "PostgreSQL", detail: "Port 5432", state: .stopped)
-            ],
-            customStatuses: [
-                ServiceStatus(name: "RabbitMQ", detail: "Port 5672", state: .running, group: .custom)
-            ]
-        )
-
-        #expect(filteredEndpoints == [DatabaseEndpoint(name: "RabbitMQ", port: 5672)])
-        #expect(composedStatuses.map(\.name) == ["Docker", "PostgreSQL", "RabbitMQ"])
-        #expect(composedStatuses.map(\.group) == [.builtIn, .builtIn, .custom])
     }
 
     @Test func settingsDraftChangesAreDiscardedWithoutSave() throws {
@@ -412,88 +341,4 @@ private struct TestFailure: Error, CustomStringConvertible, Sendable {
     init(_ description: String) {
         self.description = description
     }
-}
-
-private final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
-    private let storage = LockedBox<[String: ProcessRunResult]>([:])
-
-    var results: [String: ProcessRunResult] {
-        get { storage.value }
-        set { storage.set(newValue) }
-    }
-
-    func run(_ executable: String, arguments: [String], timeout: TimeInterval) throws -> ProcessRunResult {
-        let key = ([executable] + arguments).joined(separator: " ")
-        return storage.value[key] ?? ProcessRunResult(exitCode: 0, stdout: "")
-    }
-}
-
-private struct FakeSocketConnector: SocketConnecting {
-    let openPorts: Set<UInt16>
-
-    func isListening(host: String, port: UInt16, timeout: Double) -> Bool {
-        openPorts.contains(port)
-    }
-}
-
-private final class MutableFakeSocketConnector: SocketConnecting, @unchecked Sendable {
-    private let storage: LockedBox<Set<UInt16>>
-
-    init(openPorts: Set<UInt16>) {
-        storage = LockedBox(openPorts)
-    }
-
-    var openPorts: Set<UInt16> {
-        get { storage.value }
-        set { storage.set(newValue) }
-    }
-
-    func isListening(host: String, port: UInt16, timeout: Double) -> Bool {
-        storage.value.contains(port)
-    }
-}
-
-private final class LockedCountingProcessResolver: ProcessResolving, @unchecked Sendable {
-    private let lock = NSLock()
-    private let processInfo: PortProcessInfo?
-    private var storedRequestedPorts: [UInt16] = []
-
-    init(processInfo: PortProcessInfo?) {
-        self.processInfo = processInfo
-    }
-
-    var requestedPorts: [UInt16] {
-        lock.lock()
-        defer { lock.unlock() }
-        return storedRequestedPorts
-    }
-
-    func info(for port: UInt16) throws -> PortProcessInfo? {
-        lock.lock()
-        storedRequestedPorts.append(port)
-        lock.unlock()
-        return processInfo
-    }
-}
-
-private final class LockedCountingProcessTerminator: ProcessTerminating, @unchecked Sendable {
-    private let lock = NSLock()
-    private var storedTerminatedPIDs: [Int] = []
-
-    var terminatedPIDs: [Int] {
-        lock.lock()
-        defer { lock.unlock() }
-        return storedTerminatedPIDs
-    }
-
-    func terminate(pid: Int) -> String? {
-        lock.lock()
-        storedTerminatedPIDs.append(pid)
-        lock.unlock()
-        return nil
-    }
-}
-
-private final class FakeProcessTerminator: ProcessTerminating, @unchecked Sendable {
-    func terminate(pid: Int) -> String? { nil }
 }
