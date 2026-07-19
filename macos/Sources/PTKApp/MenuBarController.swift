@@ -85,10 +85,124 @@ private final class UnavailableNotificationClient:
         throw UnavailableNotificationError.unbundledProcess
     }
 }
+@MainActor
+private final class RefreshState {
+    enum Branch: Hashable {
+        case port
+        case service
+    }
 
+    struct Request {
+        let generation: Int
+        let completion: @MainActor () -> Void
+    }
 
+    struct Active {
+        let request: Request
+        let watchedPorts: Set<UInt16>
+        let watchedEpoch: UInt64
+        var pendingBranches: Set<Branch>
+        var portTask: Task<Void, Never>?
+        var serviceTask: Task<Void, Never>?
+    }
 
+    enum Effect {
+        case start(Request)
+        case complete(Request)
+        case cancel(Task<Void, Never>)
+    }
 
+    private(set) var newestRequestedGeneration: Int?
+    private(set) var activeRefreshes: [Int: Active] = [:]
+    private(set) var pendingRefresh: Request?
+    private var startAuthorizations: [Int: Request] = [:]
+    private var nextGeneration = 0
+
+    func request(completion: @escaping @MainActor () -> Void) -> [Effect] {
+        nextGeneration += 1
+        let request = Request(generation: nextGeneration, completion: completion)
+        newestRequestedGeneration = request.generation
+        guard activeRefreshes.count >= 2 else {
+            startAuthorizations[request.generation] = request
+            return [.start(request)]
+        }
+
+        let replaced = pendingRefresh
+        pendingRefresh = request
+        return replaced.map { [.complete($0)] } ?? []
+    }
+
+    func beginActive(generation: Int, watchedPorts: Set<UInt16>, watchedEpoch: UInt64) -> Bool {
+        guard let request = startAuthorizations.removeValue(forKey: generation),
+              activeRefreshes.count < 2 else { return false }
+        activeRefreshes[generation] = Active(
+            request: request,
+            watchedPorts: watchedPorts,
+            watchedEpoch: watchedEpoch,
+            pendingBranches: [.port, .service],
+            portTask: nil,
+            serviceTask: nil
+        )
+        return true
+    }
+
+    func attachTask(_ task: Task<Void, Never>, branch: Branch, generation: Int) -> [Effect] {
+        guard var refresh = activeRefreshes[generation],
+              refresh.pendingBranches.contains(branch) else { return [.cancel(task)] }
+        switch branch {
+        case .port: refresh.portTask = task
+        case .service: refresh.serviceTask = task
+        }
+        activeRefreshes[generation] = refresh
+        return []
+    }
+
+    func claimBranch(generation: Int, branch: Branch) -> Active? {
+        guard let refresh = activeRefreshes[generation],
+              refresh.pendingBranches.contains(branch) else { return nil }
+        return refresh
+    }
+
+    func settleBranch(generation: Int, branch: Branch) -> [Effect] {
+        guard var refresh = activeRefreshes[generation],
+              refresh.pendingBranches.remove(branch) != nil else { return [] }
+        switch branch {
+        case .port: refresh.portTask = nil
+        case .service: refresh.serviceTask = nil
+        }
+        guard refresh.pendingBranches.isEmpty else {
+            activeRefreshes[generation] = refresh
+            return []
+        }
+
+        activeRefreshes.removeValue(forKey: generation)
+        var effects: [Effect] = [.complete(refresh.request)]
+        if activeRefreshes.count < 2, let promoted = pendingRefresh {
+            pendingRefresh = nil
+            startAuthorizations[promoted.generation] = promoted
+            effects.append(.start(promoted))
+        }
+        return effects
+    }
+
+    func stop() -> [Effect] {
+        let tasks = activeRefreshes.values
+            .flatMap { [$0.portTask, $0.serviceTask] }
+            .compactMap { $0 }
+        newestRequestedGeneration = nil
+        pendingRefresh = nil
+        startAuthorizations.removeAll()
+        activeRefreshes.removeAll()
+        return tasks.map(Effect.cancel)
+    }
+
+    var isRefreshing: Bool {
+        guard let newestRequestedGeneration else { return false }
+        if pendingRefresh?.generation == newestRequestedGeneration { return true }
+        return activeRefreshes[newestRequestedGeneration]?.pendingBranches.isEmpty == false
+    }
+
+}
 
 @MainActor
 final class MenuBarController: NSObject {
@@ -110,13 +224,10 @@ final class MenuBarController: NSObject {
     private var recentPortChanges: [PortChange] = []
     private var portErrorMessage: String?
     private var serviceErrorMessage: String?
-    private var nextGeneration = 0
-    private var newestRequestedGeneration: Int?
-    private var activeRefreshes: [Int: ActiveRefresh] = [:]
-    private var pendingRefresh: RefreshRequest?
+    private let refreshState = RefreshState()
+    private var isStopped = false
     private var killTask: Task<String?, Never>?
     private var activeKillID: UUID?
-    private var isStopped = false
     private let notificationCoordinator: PortChangeNotificationCoordinator
     private weak var notificationResponseHandler: (any PortChangeNotificationResponseHandling)?
     private var watchedEpoch: UInt64 = 0
@@ -130,25 +241,6 @@ final class MenuBarController: NSObject {
 
     private var refreshCadence: RefreshCadence = .quiet
 
-    private enum RefreshBranch: Hashable {
-        case port
-        case service
-    }
-
-    private struct RefreshRequest {
-        let generation: Int
-        let trigger: RefreshTrigger
-        let completion: @MainActor () -> Void
-    }
-
-    private struct ActiveRefresh {
-        let request: RefreshRequest
-        let watchedPorts: Set<UInt16>
-        let watchedEpoch: UInt64
-        var pendingBranches: Set<RefreshBranch>
-        var portTask: Task<Void, Never>?
-        var serviceTask: Task<Void, Never>?
-    }
 
     private struct KillOperation {
         let id: UUID
@@ -156,15 +248,15 @@ final class MenuBarController: NSObject {
     }
 
     var newestRequestedGenerationForTesting: Int? {
-        newestRequestedGeneration
+        refreshState.newestRequestedGeneration
     }
 
     var activeGenerationsForTesting: [Int] {
-        activeRefreshes.keys.sorted()
+        refreshState.activeRefreshes.keys.sorted()
     }
 
     var pendingGenerationForTesting: Int? {
-        pendingRefresh?.generation
+        refreshState.pendingRefresh?.generation
     }
 
     func settlePortForTesting(generation: Int, statuses: [PortStatus]) {
@@ -292,16 +384,8 @@ final class MenuBarController: NSObject {
     func stop() {
         guard !isStopped else { return }
         isStopped = true
+        consume(refreshState.stop())
         refreshScheduler?.stop()
-
-        let refreshes = Array(activeRefreshes.values)
-        newestRequestedGeneration = nil
-        pendingRefresh = nil
-        activeRefreshes.removeAll()
-        for refresh in refreshes {
-            refresh.portTask?.cancel()
-            refresh.serviceTask?.cancel()
-        }
         killTask?.cancel()
         killTask = nil
         activeKillID = nil
@@ -582,27 +666,26 @@ final class MenuBarController: NSObject {
             return
         }
 
-        nextGeneration += 1
-        let request = RefreshRequest(
-            generation: nextGeneration,
-            trigger: trigger,
-            completion: completion
-        )
-        newestRequestedGeneration = request.generation
+        consume(refreshState.request(completion: completion))
         lastRefreshTriggerForTesting = trigger
+        updateRefreshProgress()
+    }
 
-        if activeRefreshes.count < 2 {
-            startRefresh(request)
-        } else {
-            let replacedRequest = pendingRefresh
-            pendingRefresh = request
-            updateRefreshProgress()
-            replacedRequest?.completion()
+    private func consume(_ effects: [RefreshState.Effect]) {
+        for effect in effects {
+            switch effect {
+            case let .complete(request):
+                request.completion()
+            case let .start(request):
+                startRefresh(request)
+            case let .cancel(task):
+                task.cancel()
+            }
         }
     }
 
-    private func startRefresh(_ request: RefreshRequest) {
-        guard !isStopped, activeRefreshes.count < 2 else { return }
+    private func startRefresh(_ request: RefreshState.Request) {
+        guard !isStopped else { return }
 
         let expression = settings.watchedPortsExpression
         let parsedPorts: [UInt16]?
@@ -614,14 +697,12 @@ final class MenuBarController: NSObject {
             parsedPorts = nil
             portConfigurationError = "포트 설정 오류: \(error)"
         }
-        activeRefreshes[request.generation] = ActiveRefresh(
-            request: request,
+
+        guard refreshState.beginActive(
+            generation: request.generation,
             watchedPorts: Set(parsedPorts ?? []),
-            watchedEpoch: watchedEpoch,
-            pendingBranches: [.port, .service],
-            portTask: nil,
-            serviceTask: nil
-        )
+            watchedEpoch: watchedEpoch
+        ) else { return }
         updateRefreshProgress()
 
         let generation = request.generation
@@ -661,30 +742,20 @@ final class MenuBarController: NSObject {
 
     private func setTask(
         _ task: Task<Void, Never>,
-        branch: RefreshBranch,
+        branch: RefreshState.Branch,
         generation: Int
     ) {
-        guard var refresh = activeRefreshes[generation] else {
-            task.cancel()
-            return
-        }
-        switch branch {
-        case .port:
-            refresh.portTask = task
-        case .service:
-            refresh.serviceTask = task
-        }
-        activeRefreshes[generation] = refresh
+        consume(refreshState.attachTask(task, branch: branch, generation: generation))
     }
 
     private func settlePortBranch(generation: Int, statuses: [PortStatus]) {
-        guard canSettle(generation: generation, branch: .port) else { return }
+        guard let refresh = refreshState.claimBranch(generation: generation, branch: .port) else { return }
         if canPublish(generation: generation) {
             trackPortChanges(statuses)
             self.statuses = statuses
             portErrorMessage = statuses.compactMap(\.message).first
             updateViewModel()
-            if let refresh = activeRefreshes[generation], refresh.watchedEpoch == watchedEpoch {
+            if refresh.watchedEpoch == watchedEpoch {
                 notificationCoordinator.accept(PortChangeNotificationSnapshot(
                     generation: UInt64(generation),
                     watchedEpoch: refresh.watchedEpoch,
@@ -697,7 +768,7 @@ final class MenuBarController: NSObject {
     }
 
     private func settlePortBranch(generation: Int, errorMessage: String) {
-        guard canSettle(generation: generation, branch: .port) else { return }
+        guard refreshState.claimBranch(generation: generation, branch: .port) != nil else { return }
         if canPublish(generation: generation) {
             portErrorMessage = errorMessage
             updateViewModel()
@@ -706,7 +777,7 @@ final class MenuBarController: NSObject {
     }
 
     private func settleServiceBranch(generation: Int, snapshot: ServiceSnapshot) {
-        guard canSettle(generation: generation, branch: .service) else { return }
+        guard refreshState.claimBranch(generation: generation, branch: .service) != nil else { return }
         if canPublish(generation: generation) {
             serviceStatuses = snapshot.statuses
             dockerContainerRows = snapshot.dockerContainerRows
@@ -717,7 +788,7 @@ final class MenuBarController: NSObject {
     }
 
     private func settleServiceBranch(generation: Int, errorMessage: String) {
-        guard canSettle(generation: generation, branch: .service) else { return }
+        guard refreshState.claimBranch(generation: generation, branch: .service) != nil else { return }
         if canPublish(generation: generation) {
             serviceErrorMessage = errorMessage
             updateViewModel()
@@ -725,53 +796,17 @@ final class MenuBarController: NSObject {
         settle(generation: generation, branch: .service)
     }
 
-    private func canSettle(generation: Int, branch: RefreshBranch) -> Bool {
-        guard !isStopped, let refresh = activeRefreshes[generation] else { return false }
-        return refresh.pendingBranches.contains(branch)
-    }
-
     private func canPublish(generation: Int) -> Bool {
-        !isStopped && newestRequestedGeneration == generation
+        !isStopped && refreshState.newestRequestedGeneration == generation
     }
 
-    private func settle(generation: Int, branch: RefreshBranch) {
-        guard var refresh = activeRefreshes[generation] else { return }
-        guard refresh.pendingBranches.remove(branch) != nil else { return }
-
-        switch branch {
-        case .port:
-            refresh.portTask = nil
-        case .service:
-            refresh.serviceTask = nil
-        }
-
-        guard refresh.pendingBranches.isEmpty else {
-            activeRefreshes[generation] = refresh
-            updateRefreshProgress()
-            return
-        }
-
-        activeRefreshes.removeValue(forKey: generation)
-        refresh.request.completion()
-
-        if !isStopped, activeRefreshes.count < 2, let request = pendingRefresh {
-            pendingRefresh = nil
-            startRefresh(request)
-        }
+    private func settle(generation: Int, branch: RefreshState.Branch) {
+        consume(refreshState.settleBranch(generation: generation, branch: branch))
         updateRefreshProgress()
     }
 
     private func updateRefreshProgress() {
-        guard !isStopped, let newestRequestedGeneration else {
-            viewModel.isRefreshing = false
-            return
-        }
-        if pendingRefresh?.generation == newestRequestedGeneration {
-            viewModel.isRefreshing = true
-            return
-        }
-        viewModel.isRefreshing =
-            activeRefreshes[newestRequestedGeneration]?.pendingBranches.isEmpty == false
+        viewModel.isRefreshing = refreshState.isRefreshing
     }
 
     private func beginKill(_ target: KillTarget) -> KillOperation? {

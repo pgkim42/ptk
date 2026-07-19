@@ -130,6 +130,50 @@ import Testing
         #expect(controller.viewModel.serviceStatuses == acceptedServiceStatuses)
         #expect(controller.viewModel.dockerContainerRows == acceptedDockerRows)
     }
+    @Test func latestPendingRefreshReplacesEarlierPendingRefreshBeforeStarting() async {
+        let calls = LockedBox(0)
+        let gate = BlockingGate()
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in
+                calls.withValue { $0 += 1 }
+                gate.waitUpToOneSecond()
+                return []
+            },
+            serviceSnapshotWorker: { _ in
+                gate.waitUpToOneSecond()
+                return ServiceSnapshot(statuses: [])
+            }
+        )
+        defer {
+            controller.stop()
+            gate.open()
+        }
+
+        controller.performRefresh()
+        controller.performRefresh()
+        #expect(await eventually { calls.value == 2 })
+
+        controller.performRefresh()
+        controller.performRefresh()
+        #expect(controller.pendingGenerationForTesting == 4)
+
+        controller.settlePortForTesting(generation: 1, statuses: [])
+        controller.settleServiceForTesting(generation: 1, snapshot: ServiceSnapshot(statuses: []))
+
+        #expect(await eventually { calls.value == 3 })
+        #expect(controller.activeGenerationsForTesting == [2, 4])
+        #expect(controller.pendingGenerationForTesting == nil)
+
+        controller.settlePortForTesting(generation: 2, statuses: [])
+        controller.settleServiceForTesting(generation: 2, snapshot: ServiceSnapshot(statuses: []))
+        controller.settlePortForTesting(generation: 4, statuses: [])
+        controller.settleServiceForTesting(generation: 4, snapshot: ServiceSnapshot(statuses: []))
+
+        #expect(!controller.viewModel.isRefreshing)
+        #expect(controller.activeGenerationsForTesting.isEmpty)
+        #expect(calls.value == 3)
+    }
 
     @Test func stopCancelsOwnedWorkAndPreventsLatePublication() async {
         let settings = AppSettings(store: InMemorySettingsStore())
@@ -295,17 +339,9 @@ private final class LockedBox<Value>: @unchecked Sendable {
 private final class BlockingGate: @unchecked Sendable {
     private let condition = NSCondition()
     private var isOpen = false
-    private var waiterPresent = false
-
-    var hasWaiter: Bool {
-        condition.lock()
-        defer { condition.unlock() }
-        return waiterPresent
-    }
 
     func waitUpToOneSecond() {
         condition.lock()
-        waiterPresent = true
         let deadline = Date(timeIntervalSinceNow: 1)
         while !isOpen, condition.wait(until: deadline) {
         }
