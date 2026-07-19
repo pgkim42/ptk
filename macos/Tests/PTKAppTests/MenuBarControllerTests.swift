@@ -244,26 +244,17 @@ import Testing
 
 }
 
-@MainActor private func makeViewModel(
-    settings: AppSettings = AppSettings(store: InMemorySettingsStore()),
-    onRefresh: @escaping () -> Void = {},
-    onSettingsRefresh: (() -> Void)? = nil,
-    onKill: @escaping @MainActor (KillTarget) async -> KillRequestResult = { _ in .invalidated },
-    onKillSettled: @escaping () -> Void = {},
-    onIntervalChange: @escaping (RefreshInterval) -> Void = { _ in },
-    onOpenLocalhost: @escaping (URL) -> Void = { _ in },
-    onCopyText: @escaping (String) -> Void = { _ in }
-) -> PortMonitorViewModel {
+@MainActor private func makeViewModel(settings: AppSettings) -> PortMonitorViewModel {
     PortMonitorViewModel(
         settings: settings,
         parser: PortRangeParser(),
-        onRefresh: onRefresh,
-        onSettingsRefresh: onSettingsRefresh ?? onRefresh,
-        onKill: onKill,
-        onKillSettled: onKillSettled,
-        onIntervalChange: onIntervalChange,
-        onOpenLocalhost: onOpenLocalhost,
-        onCopyText: onCopyText
+        onRefresh: {},
+        onSettingsRefresh: {},
+        onKill: { _ in .invalidated },
+        onKillSettled: {},
+        onIntervalChange: { _ in },
+        onOpenLocalhost: { _ in },
+        onCopyText: { _ in }
     )
 }
 
@@ -292,12 +283,6 @@ private final class LockedBox<Value>: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return storedValue
-    }
-
-    func set(_ value: Value) {
-        lock.lock()
-        storedValue = value
-        lock.unlock()
     }
 
     func withValue(_ body: (inout Value) -> Void) {
