@@ -84,6 +84,21 @@ The panel can show:
 - kill-unavailable explanations with next-check hints
 - read-only Docker published-port child rows in the Services section
 
+### Panel Language and Accessibility
+
+The current app interface uses consistent Korean labels for port actions,
+service groups, and service states. For example, local-address actions use the
+same wording in hover help and VoiceOver labels, and service badges use
+`실행 중`, `중지됨`, and `확인 불가`.
+
+The menu bar item exposes an accessible summary of the open watched-port count.
+Panel icon buttons have explicit labels and action hints, port diagnostics are
+read as a single explanation, and service rows combine the service name, detail,
+and state into one VoiceOver label. Decorative status indicators are excluded
+when they would only repeat nearby text. Settings controls for notifications
+also expose labels, hints, validation errors, permission status, and the macOS
+Settings action.
+
 ### Port-Change Notifications
 
 `0.6.0` release preparation adds an opt-in local notification for selected

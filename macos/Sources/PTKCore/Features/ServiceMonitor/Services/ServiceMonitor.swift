@@ -7,9 +7,9 @@ public enum ServiceState: Equatable, Sendable {
 
     public var label: String {
         switch self {
-        case .running: "Running"
-        case .stopped: "Stopped"
-        case .unavailable: "Unavailable"
+        case .running: "실행 중"
+        case .stopped: "중지됨"
+        case .unavailable: "확인 불가"
         }
     }
 }
@@ -20,8 +20,8 @@ public enum ServiceGroup: String, Equatable, Sendable {
 
     public var label: String {
         switch self {
-        case .builtIn: "Built-in"
-        case .custom: "Custom"
+        case .builtIn: "기본 서비스"
+        case .custom: "사용자 서비스"
         }
     }
 }

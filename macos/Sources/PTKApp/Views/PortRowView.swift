@@ -44,7 +44,7 @@ struct PortRowView: View {
                         .truncationMode(.tail)
                         .help(processHelpText)
                 } else {
-                    Text("unknown")
+                    Text("알 수 없음")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(PTKTheme.faint)
                 }
@@ -58,7 +58,7 @@ struct PortRowView: View {
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
-                .help("localhost 열기")
+                .help("로컬 주소 열기")
                 .accessibilityLabel(PortRowAccessibility.openLabel(for: status))
                 .accessibilityHint(PortRowAccessibility.openHint(for: status))
 
@@ -69,7 +69,7 @@ struct PortRowView: View {
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
-                .help("localhost URL 복사")
+                .help("로컬 주소 복사")
                 .accessibilityLabel(PortRowAccessibility.copyURLLabel(for: status))
                 .accessibilityHint(PortRowAccessibility.copyURLHint(for: status))
 
@@ -147,7 +147,7 @@ struct PortRowView: View {
 
 enum PortRowAccessibility {
     static func openLabel(for status: PortStatus) -> String {
-        "포트 \(status.port) localhost 열기"
+        "포트 \(status.port) 로컬 주소 열기"
     }
 
     static func openHint(for status: PortStatus) -> String {
@@ -155,7 +155,7 @@ enum PortRowAccessibility {
     }
 
     static func copyURLLabel(for status: PortStatus) -> String {
-        "포트 \(status.port) localhost URL 복사"
+        "포트 \(status.port) 로컬 주소 복사"
     }
 
     static func copyURLHint(for status: PortStatus) -> String {

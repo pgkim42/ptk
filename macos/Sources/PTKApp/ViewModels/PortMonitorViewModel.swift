@@ -25,7 +25,7 @@ struct KillUnavailableDiagnosticPresenter {
         switch cause {
         case let .ambiguousListener(message):
             return KillUnavailableDiagnostic(
-                title: "여러 listener가 있어 안전하게 종료할 수 없음",
+                title: "여러 수신 프로세스가 있어 안전하게 종료할 수 없음",
                 detail: message,
                 hint: "포트 \(status.port)를 점유한 프로세스를 터미널에서 직접 확인한 뒤 정리하세요."
             )
@@ -374,7 +374,7 @@ final class PortMonitorViewModel: ObservableObject {
     }
 
     var currentProfileTitle: String {
-        profileOptions.first { $0.expression == portExpression }?.title ?? "Custom"
+        profileOptions.first { $0.expression == portExpression }?.title ?? "사용자 설정"
     }
 
     var groupedServiceStatuses: [ServiceStatusGroup] {
@@ -388,7 +388,7 @@ final class PortMonitorViewModel: ObservableObject {
 
     var customServiceEmptyMessage: String? {
         customServiceEndpoints.isEmpty
-            ? "No custom services yet. Add read-only port checks in Settings."
+            ? "사용자 서비스가 없습니다. 설정에서 읽기 전용 포트 확인을 추가할 수 있습니다."
             : nil
     }
 
