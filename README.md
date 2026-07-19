@@ -205,7 +205,8 @@ Open port rows include quick actions to open `http://localhost:<port>` in the
 browser, copy that localhost URL, or copy port details such as PID, process path
 or command, and kill-unavailable reasons. The row itself stays compact by showing
 the executable name first, and the footer can copy a compact summary of currently
-open watched ports.
+open watched ports. Every successful copy briefly replaces the refresh interval
+badge with a checkmark and confirmation message.
 
 When the panel is closed, PTK reduces scan cadence with an internal quiet
 interval that is slower than every user-selectable refresh interval. Reopening

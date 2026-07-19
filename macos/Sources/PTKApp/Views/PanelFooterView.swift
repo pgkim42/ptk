@@ -7,12 +7,19 @@ struct PanelFooterView: View {
         HStack(spacing: 8) {
             profileQuickSwitch
 
-            Text(viewModel.refreshInterval.label)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .foregroundStyle(PTKTheme.muted)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(PTKTheme.card))
+            Group {
+                if let message = viewModel.copyFeedbackMessage {
+                    Label(message, systemImage: "checkmark")
+                        .accessibilityLabel(message)
+                } else {
+                    Text(viewModel.refreshInterval.label)
+                }
+            }
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .foregroundStyle(PTKTheme.muted)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(PTKTheme.card))
 
             Spacer()
 

@@ -286,6 +286,38 @@ import Testing
         #expect(try reloaded.loadCustomServiceEndpoints().map(\.name) == ["Redis"])
     }
 
+    @MainActor
+    @Test func copyActionsShowFeedbackAndClearItAfterDelay() async {
+        var copied: [String] = []
+        let viewModel = PortMonitorViewModel(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            onRefresh: {},
+            onCopyText: { copied.append($0) },
+            copyFeedbackDurationNanoseconds: 20_000_000
+        )
+        let status = PortStatus(port: 3000, isOpen: true, pid: 42, processName: "node")
+        let dockerRow = DockerContainerPortRow(
+            id: "api",
+            name: "api",
+            detail: "3000 -> 3000",
+            copyCandidates: [
+                DockerPortCopyCandidate(label: "3000", urlString: "http://localhost:3000")
+            ]
+        )
+        viewModel.statuses = [status]
+
+        viewModel.copyLocalhostURL(for: status)
+        viewModel.copyPortDetails(for: status)
+        viewModel.copyDockerContainerURL(for: dockerRow)
+        viewModel.copyOpenPortsSummary()
+
+        #expect(copied.count == 4)
+        #expect(viewModel.copyFeedbackMessage == "복사됨")
+
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(viewModel.copyFeedbackMessage == nil)
+    }
+
 }
 
 @MainActor private func makeViewModel(settings: AppSettings) -> PortMonitorViewModel {

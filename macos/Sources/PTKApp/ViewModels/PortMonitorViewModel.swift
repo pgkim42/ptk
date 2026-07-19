@@ -237,6 +237,7 @@ final class PortMonitorViewModel: ObservableObject {
     @Published var portChangeNotificationPreference: PortChangeNotificationPreference
     @Published var notificationPermissionStatus: PortChangeNotificationPermissionStatus = .unknown
     @Published var notificationPermissionError: String?
+    @Published private(set) var copyFeedbackMessage: String?
 
     @Published var killConfirmationTarget: KillTarget?
     @Published var killErrorMessage: String?
@@ -282,6 +283,8 @@ final class PortMonitorViewModel: ObservableObject {
     private let onPermissionRequest: @MainActor () async -> NotificationPermissionUpdate
     private let onOpenNotificationSettings: (URL) -> Bool
     private var killRequestID: UUID?
+    private let copyFeedbackDurationNanoseconds: UInt64
+    private var copyFeedbackTask: Task<Void, Never>?
 
     init(
         settings: AppSettings,
@@ -298,7 +301,8 @@ final class PortMonitorViewModel: ObservableObject {
         onPermissionRequest: @escaping @MainActor () async -> PortChangeNotificationPermissionStatus = { .unknown },
         onPermissionRefreshUpdate: (@MainActor () async -> NotificationPermissionUpdate)? = nil,
         onPermissionRequestUpdate: (@MainActor () async -> NotificationPermissionUpdate)? = nil,
-        onOpenNotificationSettings: @escaping (URL) -> Bool = { _ in false }
+        onOpenNotificationSettings: @escaping (URL) -> Bool = { _ in false },
+        copyFeedbackDurationNanoseconds: UInt64 = 1_500_000_000
     ) {
         var initialSettingsErrors: [String] = []
         let initialProfiles: [PortProfile]
@@ -346,6 +350,7 @@ final class PortMonitorViewModel: ObservableObject {
             NotificationPermissionUpdate(status: await onPermissionRequest(), errorMessage: nil)
         }
         self.onOpenNotificationSettings = onOpenNotificationSettings
+        self.copyFeedbackDurationNanoseconds = copyFeedbackDurationNanoseconds
         self.settingsErrorMessage = initialSettingsErrors.isEmpty
             ? nil
             : initialSettingsErrors.joined(separator: "\n")
@@ -621,11 +626,13 @@ final class PortMonitorViewModel: ObservableObject {
 
     func copyLocalhostURL(for status: PortStatus) {
         onCopyText(localhostURL(for: status.port).absoluteString)
+        showCopyFeedback()
     }
 
     func copyDockerContainerURL(for row: DockerContainerPortRow) {
         guard !row.isSummary, row.copyCandidates.count == 1, let candidate = row.copyCandidates.first else { return }
         onCopyText(candidate.urlString)
+        showCopyFeedback()
     }
 
     func copyPortDetails(for status: PortStatus) {
@@ -647,11 +654,13 @@ final class PortMonitorViewModel: ObservableObject {
             lines.append("Hint: \(diagnostic.hint)")
         }
         onCopyText(lines.joined(separator: "\n"))
+        showCopyFeedback()
     }
 
     func copyOpenPortsSummary() {
         guard !openPorts.isEmpty else {
             onCopyText("No open watched ports")
+            showCopyFeedback()
             return
         }
 
@@ -666,8 +675,19 @@ final class PortMonitorViewModel: ObservableObject {
             return parts.joined(separator: " ")
         }.joined(separator: "\n")
         onCopyText(summary)
+        showCopyFeedback()
     }
 
+    private func showCopyFeedback() {
+        copyFeedbackTask?.cancel()
+        copyFeedbackMessage = "복사됨"
+        let duration = copyFeedbackDurationNanoseconds
+        copyFeedbackTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: duration)
+            guard !Task.isCancelled else { return }
+            self?.copyFeedbackMessage = nil
+        }
+    }
     private func localhostURL(for port: UInt16) -> URL {
         URL(string: "http://localhost:\(port)")!
     }
