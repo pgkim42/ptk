@@ -459,53 +459,8 @@ final class PortMonitorViewModel: ObservableObject {
         onSettingsRefresh()
     }
 
-    func applyPreset(_ preset: PortPreset) throws {
-        try saveExpression(preset.expression)
-    }
-
-    func applyProfile(_ profile: PortProfile) throws {
-        try saveExpression(profile.expression)
-    }
-
     func applyProfileOption(_ option: PortProfileOption) throws {
         try saveExpression(option.expression)
-    }
-
-    func saveCustomProfile(title: String, expression: String) throws {
-        try settings.saveCustomPortProfile(title: title, expression: expression, parser: parser)
-        customPortProfiles = settings.customPortProfiles
-    }
-
-    func deleteCustomProfile(_ profile: PortProfile) throws {
-        try settings.deleteCustomPortProfile(id: profile.id)
-        customPortProfiles = try settings.loadCustomPortProfiles()
-    }
-
-    func saveCustomServiceEndpoint(name: String, portText: String) throws {
-        guard let port = Int(portText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            throw AppSettingsError.invalidServicePort
-        }
-        try settings.saveCustomServiceEndpoint(name: name, port: port)
-        customServiceEndpoints = settings.customServiceEndpoints
-        onSettingsRefresh()
-    }
-
-    func deleteCustomServiceEndpoint(_ endpoint: DatabaseEndpoint) throws {
-        try settings.deleteCustomServiceEndpoint(id: endpoint.id)
-        customServiceEndpoints = try settings.loadCustomServiceEndpoints()
-        onSettingsRefresh()
-    }
-
-    func saveInterval(_ interval: RefreshInterval) {
-        settings.refreshInterval = interval
-        refreshInterval = interval
-        onIntervalChange(interval)
-        onSettingsRefresh()
-    }
-
-    func saveTheme(_ theme: AppTheme) {
-        settings.theme = theme
-        self.theme = theme
     }
 
     func makeSettingsDraft() -> SettingsDraft {

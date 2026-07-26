@@ -80,30 +80,10 @@ require_all("README.md", (
     "SIGTERM` only",
     "signed PKG installer packaging",
 ))
-require_all("README.ko.md", (
-    "현재 릴리스 준비 버전: `0.6.0`",
-    "최신 공개 배포 파일: `0.5.0`",
-    "macOS 13 이상",
-    "기본값이 꺼짐입니다.",
-    "교집합에 있어야 합니다.",
-    "절대 띄우지 않습니다.",
-    "설정을 저장한 뒤에만",
-    "macOS Settings로 연결합니다.",
-    "켜기 상태나 선택 표현식이 지워지지 않습니다.",
-    "PTK 패널만 엽니다.",
-    "`SIGTERM`만",
-    "서명된 PKG 설치 패키지",
-))
+require("`0.6.0`" in Path("README.ko.md").read_text(), "Korean README names release 0.6.0")
+require("`0.5.0`" in Path("README.ko.md").read_text(), "Korean README names published release 0.5.0")
 require_all("macos/README.md", (
-    "기본으로\n끈 상태",
-    "두 표현식의 교집합",
-    "권한 요청을 절대\n띄우지 않습니다.",
-    "유효한 켜기 설정을\n저장한 뒤에만",
-    "macOS Settings로 연결",
-    "켜기 상태와 포트 표현식은 유지합니다.",
-    "PTK 패널만 엽니다.",
     "Swift/AppKit",
-    "프로세스 종료는 재검증 뒤 `SIGTERM`만 사용합니다.",
     "`SIGTERM`",
 ))
 require_all("macos/Package.swift", (

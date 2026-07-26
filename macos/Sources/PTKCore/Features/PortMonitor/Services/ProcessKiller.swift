@@ -42,7 +42,7 @@ public enum KillError: Error, Equatable, CustomStringConvertible {
         case .resolverFailed(let message):
             return "process lookup failed: \(message)"
         case .untrustedListener(let port, let reasons):
-            let reasonList = normalizedKillUntrustedReasons(reasons)
+            let reasonList = reasons.normalizedByResolutionOrder
                 .map { String(describing: $0) }
                 .joined(separator: ", ")
             return "untrusted listener for port \(port): \(reasonList); refresh and try again"
@@ -117,7 +117,7 @@ public struct KillService: Sendable {
         } catch ProcessLookupError.untrustedListeners(let port, let reasons) {
             throw KillError.untrustedListener(
                 port: port,
-                reasons: normalizedKillUntrustedReasons(reasons)
+                reasons: reasons.normalizedByResolutionOrder
             )
         } catch ProcessLookupError.ambiguousListeners(let port, let pids) {
             throw KillError.ambiguousListeners(port: port, pids: pids.sorted())
@@ -158,30 +158,5 @@ public struct KillCoordinator {
         guard confirmer.confirmKill(target: target) else { return .cancelled }
         try service.terminateAfterRevalidation(target: target)
         return .terminated
-    }
-}
-
-private func normalizedKillUntrustedReasons(
-    _ reasons: [LsofUntrustedReason]
-) -> [LsofUntrustedReason] {
-    Array(Set(reasons)).sorted {
-        killUntrustedReasonOrder($0) < killUntrustedReasonOrder($1)
-    }
-}
-
-private func killUntrustedReasonOrder(_ reason: LsofUntrustedReason) -> Int {
-    switch reason {
-    case .remoteOrInterfaceOnly:
-        0
-    case .established:
-        1
-    case .unknownFamily:
-        2
-    case .unknownAddress:
-        3
-    case .malformed:
-        4
-    case .familyAddressConflict:
-        5
     }
 }

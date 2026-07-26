@@ -419,10 +419,6 @@ public struct ServiceMonitor: Sendable {
         self.dockerCommandTimeout = max(dockerCommandTimeout, 0.1)
     }
 
-    public func scan() -> [ServiceStatus] {
-        [dockerStatus()] + databaseStatuses()
-    }
-
     public func scanWithDetails() -> ServiceSnapshot {
         var docker = dockerStatus()
         var dockerContainerRows: [DockerContainerPortRow] = []

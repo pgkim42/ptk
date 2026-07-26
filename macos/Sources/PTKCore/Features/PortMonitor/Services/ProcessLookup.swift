@@ -37,7 +37,7 @@ public enum ProcessLookupError: Error, Equatable, CustomStringConvertible {
             let pidList = pids.sorted().map(String.init).joined(separator: ", ")
             return "ambiguous listeners for port \(port): PIDs \(pidList)"
         case .untrustedListeners(let port, let reasons):
-            let reasonList = normalizedUntrustedReasons(reasons)
+            let reasonList = reasons.normalizedByResolutionOrder
                 .map { String(describing: $0) }
                 .joined(separator: ", ")
             return "untrusted listeners for port \(port): \(reasonList)"
@@ -73,21 +73,6 @@ public struct ProcessLookup: Sendable {
         return parser.parse(result.stdout)
     }
 
-    public func listeningPortPIDMap() throws -> [UInt16: Set<Int>] {
-        let snapshot = try listeningSnapshot()
-        var output: [UInt16: Set<Int>] = [:]
-        for port in Set(snapshot.records.compactMap(\.port)).sorted() {
-            switch snapshot.resolution(for: port) {
-            case .verified(let pid):
-                output[port] = [pid]
-            case .ambiguous(let pids):
-                output[port] = Set(pids)
-            case .absent, .untrusted:
-                break
-            }
-        }
-        return output
-    }
 
     public func processName(pid: Int) throws -> String? {
         guard pid > 0 else { return nil }
@@ -127,7 +112,7 @@ public struct ProcessLookup: Sendable {
         case .untrusted(let reasons):
             throw ProcessLookupError.untrustedListeners(
                 port: port,
-                reasons: normalizedUntrustedReasons(reasons)
+                reasons: reasons.normalizedByResolutionOrder
             )
         }
 
@@ -138,30 +123,5 @@ public struct ProcessLookup: Sendable {
             throw ProcessLookupError.processNameUnavailable(pid: pid)
         }
         return PortProcessInfo(port: port, identity: identity)
-    }
-}
-
-private func normalizedUntrustedReasons(
-    _ reasons: [LsofUntrustedReason]
-) -> [LsofUntrustedReason] {
-    Array(Set(reasons)).sorted {
-        untrustedReasonOrder($0) < untrustedReasonOrder($1)
-    }
-}
-
-private func untrustedReasonOrder(_ reason: LsofUntrustedReason) -> Int {
-    switch reason {
-    case .remoteOrInterfaceOnly:
-        0
-    case .established:
-        1
-    case .unknownFamily:
-        2
-    case .unknownAddress:
-        3
-    case .malformed:
-        4
-    case .familyAddressConflict:
-        5
     }
 }

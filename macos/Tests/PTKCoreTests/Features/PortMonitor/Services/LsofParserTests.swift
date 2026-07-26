@@ -126,17 +126,6 @@ import Testing
         #expect(snapshot.resolution(for: 65000) == .untrusted(reasons: [.malformed]))
     }
 
-    @Test func parsesSupportedPortsWithoutTreatingConnectionsAsListeners() {
-        let parser = LsofParser()
-
-        #expect(parser.parsePort(fromTCPName: "*:3000") == 3000)
-        #expect(parser.parsePort(fromTCPName: "127.0.0.1:5173") == 5173)
-        #expect(parser.parsePort(fromTCPName: "[::1]:4200") == 4200)
-        #expect(parser.parsePort(fromTCPName: ":::4201") == 4201)
-        #expect(parser.parsePort(fromTCPName: "127.0.0.1:61000->127.0.0.1:3000") == nil)
-        #expect(parser.parsePort(fromTCPName: "invalid") == nil)
-    }
-
     private func record(for port: UInt16, in snapshot: LsofSnapshot) -> LsofListenerRecord? {
         snapshot.records.first { $0.port == port }
     }

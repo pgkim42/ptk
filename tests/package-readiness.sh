@@ -28,6 +28,13 @@ assert_contains() {
   grep -Fq "$expected" "$path" || fail "$path contains: $expected"
   pass "$path contains: $expected"
 }
+assert_not_contains() {
+  local path="$1"
+  local unexpected="$2"
+  ! grep -Fq "$unexpected" "$path" || fail "$path does not contain: $unexpected"
+  pass "$path does not contain: $unexpected"
+}
+
 TEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ptk-package-readiness.XXXXXX")"
 trap 'rm -rf "$TEST_TMP"' EXIT
 
@@ -208,7 +215,7 @@ assert_contains docs/roadmap.md "Unsigned DMG and ZIP release artifacts"
 assert_contains docs/roadmap.md "## v0.6.0 — current release preparation"
 assert_contains docs/roadmap.md "local port-change notification"
 assert_contains tests/release-readiness.sh "tests/package-readiness.sh"
-assert_contains tests/open-source-readiness.sh "tests/package-readiness.sh"
+assert_not_contains tests/open-source-readiness.sh "tests/package-readiness.sh"
 
 test_successful_package
 test_invalid_versions

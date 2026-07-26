@@ -57,18 +57,10 @@ if swift_job:
         body = test_steps[0].group("body")
         require(re.search(r"^        timeout-minutes: 2$", body, re.MULTILINE), "Test package has a two-minute timeout")
         require(re.search(r"^        working-directory: macos$", body, re.MULTILINE), "Test package runs in macos")
-        command = re.search(r"^        run: swift test --filter '([^']+)'$", body, re.MULTILINE)
-        require(command is not None, "Test package uses one filtered swift test command")
-        if command:
-            expected = {
-                "AppSettingsTests", "KillSafetyTests", "LsofParserTests", "MenuModelTests",
-                "PortRangeParserTests", "PortScannerTests", "ProcessLookupTests",
-                "RefreshSchedulerTests", "PortChangeNotificationCoordinatorTests",
-                "UserNotificationClientTests", "PortChangeNotificationIntegrationTests",
-                "PortChangeNotificationAccessibilityTests",
-            }
-            actual = command.group(1).split("|")
-            require(set(actual) == expected and len(actual) == len(expected), "filtered test suites match the bounded set exactly")
+        require(
+            re.search(r"^        run: swift test$", body, re.MULTILINE) is not None,
+            "Test package runs the full swift test suite",
+        )
     normalized_workflow = re.sub(r"\\\s*\n\s*", " ", workflow)
     require(
         len(re.findall(r"\bswift\s+test\b", normalized_workflow)) == 1,

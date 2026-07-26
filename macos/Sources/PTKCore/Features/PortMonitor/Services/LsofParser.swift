@@ -85,13 +85,13 @@ public struct LsofSnapshot: Sendable, Equatable {
         }
 
         if !poisonReasons.isEmpty {
-            return .untrusted(reasons: poisonReasons.sortedByResolutionOrder)
+            return .untrusted(reasons: poisonReasons.normalizedByResolutionOrder)
         }
 
         let pids = verifiedPIDs.sorted()
         switch pids.count {
         case 0 where !untrustedReasons.isEmpty:
-            return .untrusted(reasons: untrustedReasons.sortedByResolutionOrder)
+            return .untrusted(reasons: untrustedReasons.normalizedByResolutionOrder)
         case 0:
             return .absent
         case 1:
@@ -112,28 +112,7 @@ public struct LsofParser: Sendable {
         return LsofSnapshot(records: records)
     }
 
-    public func parseListeningPIDMap(_ stdout: String) -> [UInt16: Set<Int>] {
-        let snapshot = parse(stdout)
-        var output: [UInt16: Set<Int>] = [:]
 
-        for port in Set(snapshot.records.compactMap(\.port)).sorted() {
-            switch snapshot.resolution(for: port) {
-            case let .verified(pid):
-                output[port] = [pid]
-            case let .ambiguous(pids):
-                output[port] = Set(pids)
-            case .absent, .untrusted:
-                break
-            }
-        }
-
-        return output
-    }
-
-    public func parsePort(fromTCPName name: String) -> UInt16? {
-        guard !name.contains("->") else { return nil }
-        return parseEndpoint(name).port
-    }
 
     private func parseTCPRecord(_ line: String) -> LsofListenerRecord? {
         let columns = line.split { $0.isWhitespace }.map(String.init)
@@ -326,7 +305,7 @@ private enum AddressKind {
     case unknown
 }
 
-private extension LsofUntrustedReason {
+extension LsofUntrustedReason {
     var poisonsIdentityResolution: Bool {
         switch self {
         case .remoteOrInterfaceOnly, .established:
@@ -354,8 +333,8 @@ private extension LsofUntrustedReason {
     }
 }
 
-private extension Set where Element == LsofUntrustedReason {
-    var sortedByResolutionOrder: [LsofUntrustedReason] {
-        sorted { $0.resolutionOrder < $1.resolutionOrder }
+extension Collection where Element == LsofUntrustedReason {
+    var normalizedByResolutionOrder: [LsofUntrustedReason] {
+        Array(Set(self)).sorted { $0.resolutionOrder < $1.resolutionOrder }
     }
 }

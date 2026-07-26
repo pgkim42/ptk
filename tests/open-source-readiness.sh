@@ -120,6 +120,4 @@ assert_not_exists package-lock.json
 assert_not_exists src-tauri
 assert_not_exists ui
 
-assert_file tests/package-readiness.sh
-tests/package-readiness.sh
 pass "open-source-readiness"
