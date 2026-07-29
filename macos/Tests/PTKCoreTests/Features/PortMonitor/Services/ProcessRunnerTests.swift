@@ -151,6 +151,20 @@ import Testing
         process.closeHeldDescriptor()
     }
 
+    @Test(arguments: [
+        ("lsof", "/usr/sbin/lsof"),
+        ("ps", "/bin/ps")
+    ])
+    func systemRunnerUsesPinnedSystemExecutablePaths(executable: String, expectedPath: String) throws {
+        let process = FakeOwnedHelperProcess(exitBehavior: .immediate)
+        let runner = SystemProcessRunner(helperRunner: OwnedHelperRunner(processFactory: { process }))
+
+        _ = try runner.run(executable, arguments: ["argument"], timeout: 1)
+
+        #expect(process.executableURL?.path == expectedPath)
+        #expect(process.arguments == ["argument"])
+    }
+
 }
 
 private enum FixtureError: Error {

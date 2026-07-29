@@ -53,8 +53,8 @@ public struct SystemProcessRunner: ProcessRunning {
     public func run(_ executable: String, arguments: [String], timeout: TimeInterval) throws -> ProcessRunResult {
         do {
             let result = try helperRunner.run(
-                "/usr/bin/env",
-                arguments: [executable] + arguments,
+                executablePath(for: executable),
+                arguments: arguments,
                 configuration: OwnedHelperConfiguration(timeout: timeout)
             )
             return ProcessRunResult(
@@ -64,6 +64,17 @@ public struct SystemProcessRunner: ProcessRunning {
             )
         } catch let error as OwnedHelperError {
             throw map(error)
+        }
+    }
+
+    private func executablePath(for executable: String) -> String {
+        switch executable {
+        case "lsof":
+            "/usr/sbin/lsof"
+        case "ps":
+            "/bin/ps"
+        default:
+            executable
         }
     }
 
