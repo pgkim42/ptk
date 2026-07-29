@@ -2,7 +2,7 @@ import SwiftUI
 import PTKCore
 
 struct ContentView: View {
-    static let panelSize = NSSize(width: 392, height: 420)
+    static let panelSize = NSSize(width: 392, height: 540)
 
     @ObservedObject var viewModel: PortMonitorViewModel
 
@@ -26,6 +26,8 @@ struct ContentView: View {
                 if !viewModel.serviceStatuses.isEmpty {
                     ServiceStatusSectionView(viewModel: viewModel)
                 }
+
+                AIUsageSectionView()
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
