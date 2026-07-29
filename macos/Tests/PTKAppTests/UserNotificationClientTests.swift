@@ -15,6 +15,12 @@ struct UserNotificationClientTests {
     ) -> PortChangeNotificationCandidate {
         PortChangeNotificationCandidate(port: port, kind: kind, pid: pid, processName: processName)
     }
+
+    @Test func nativeNotificationsRequireAnApplicationBundleIdentifier() {
+        #expect(AppDelegate.canUseUserNotifications(bundleIdentifier: "com.example.PTK"))
+        #expect(AppDelegate.canUseUserNotifications(bundleIdentifier: nil) == false)
+        #expect(AppDelegate.canUseUserNotifications(bundleIdentifier: "") == false)
+    }
     @Test func verifiedOpenPayloadIncludesExistingProcessDetail() {
         let payload = PortChangeNotificationPayload(candidate: candidate(processName: "/usr/local/bin/node"))!
 

@@ -26,9 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.snapshotKind = snapshotKind
         showPanelOnLaunch = environment["PTK_QA_SHOW_PANEL"] == "1" || snapshotURL != nil
         let notificationClient: UserNotificationClient?
-        if snapshotURL == nil {
-            let nativeClient = UserNotificationClient()
-            notificationClient = nativeClient
+        if snapshotURL == nil, Self.canUseUserNotifications(bundleIdentifier: Bundle.main.bundleIdentifier) {
+            notificationClient = UserNotificationClient()
         } else {
             notificationClient = nil
         }
@@ -62,6 +61,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         super.init()
+    }
+
+    static func canUseUserNotifications(bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return !bundleIdentifier.isEmpty
     }
 
     private static var dockerPanelSnapshotScanner: PortScanner {
