@@ -64,23 +64,70 @@ public struct ServiceStatus: Equatable, Sendable {
 }
 
 public struct DockerPublishedPort: Equatable, Hashable, Sendable {
+    public let hostAddress: String?
     public let hostPort: String
     public let containerPort: String
+    public let transportProtocol: String?
     public let sortPort: UInt16
 
-    public init(hostPort: String, containerPort: String, sortPort: UInt16) {
+    public init(
+        hostAddress: String? = nil,
+        hostPort: String,
+        containerPort: String,
+        transportProtocol: String? = nil,
+        sortPort: UInt16
+    ) {
+        self.hostAddress = hostAddress
         self.hostPort = hostPort
         self.containerPort = containerPort
+        self.transportProtocol = transportProtocol?.lowercased()
         self.sortPort = sortPort
     }
 
     public var displayText: String {
-        "\(hostPort) -> \(containerPort)"
+        let protocolSuffix = transportProtocol.map { "/\($0)" } ?? ""
+        return "\(displayHost):\(hostPort) -> \(containerPort)\(protocolSuffix)"
     }
 
     public var localhostURLString: String? {
-        guard UInt16(hostPort) != nil else { return nil }
+        guard
+            transportProtocol == "tcp",
+            UInt16(hostPort) != nil,
+            isLocalhostBinding
+        else { return nil }
         return "http://localhost:\(hostPort)"
+    }
+
+    private var isLocalhostBinding: Bool {
+        guard let hostAddress else { return false }
+        return ["0.0.0.0", "127.0.0.1", "::", "::1", "localhost"]
+            .contains(hostAddress.lowercased())
+    }
+
+    private var displayHost: String {
+        switch bindingScope {
+        case "wildcard": return "*"
+        case "loopback": return "localhost"
+        case let scope where scope.hasPrefix("remote:"):
+            let address = String(scope.dropFirst("remote:".count))
+            return address.contains(":") ? "[\(address)]" : address
+        default: return "host"
+        }
+    }
+
+    fileprivate var presentationIdentity: String {
+        "\(bindingScope)|\(hostPort)|\(containerPort)|\(transportProtocol ?? "")"
+    }
+
+    private var bindingScope: String {
+        guard let address = hostAddress?.lowercased() else { return "unspecified" }
+        if ["0.0.0.0", "::"].contains(address) { return "wildcard" }
+        if ["127.0.0.1", "::1", "localhost"].contains(address) { return "loopback" }
+        return "remote:\(address)"
+    }
+
+    fileprivate var sortIdentity: String {
+        "\(hostAddress ?? "")|\(hostPort)|\(containerPort)|\(transportProtocol ?? "")"
     }
 }
 
@@ -105,7 +152,7 @@ public struct DockerContainerPublishedPorts: Equatable, Identifiable, Sendable {
         self.name = name
         self.publishedPorts = publishedPorts.sorted { lhs, rhs in
             if lhs.sortPort == rhs.sortPort {
-                return lhs.displayText < rhs.displayText
+                return lhs.sortIdentity < rhs.sortIdentity
             }
             return lhs.sortPort < rhs.sortPort
         }
@@ -170,8 +217,9 @@ public struct DockerContainerPortRow: Equatable, Identifiable, Sendable {
     }
 
     private static func portSummary(for ports: [DockerPublishedPort], maxMappings: Int) -> String {
-        var parts = ports.prefix(maxMappings).map(\.displayText)
-        let hiddenCount = ports.count - parts.count
+        let displayPorts = uniqueDisplayPorts(ports)
+        var parts = displayPorts.prefix(maxMappings).map(\.displayText)
+        let hiddenCount = displayPorts.count - parts.count
         if hiddenCount > 0 {
             parts.append("+\(hiddenCount)")
         }
@@ -179,13 +227,19 @@ public struct DockerContainerPortRow: Equatable, Identifiable, Sendable {
     }
 
     private static func copyCandidates(for ports: [DockerPublishedPort], maxMappings: Int) -> [DockerPortCopyCandidate] {
-        guard ports.count <= maxMappings else { return [] }
-        let candidates = ports.compactMap { port -> DockerPortCopyCandidate? in
+        let displayPorts = uniqueDisplayPorts(ports)
+        guard displayPorts.count <= maxMappings else { return [] }
+        let candidates = displayPorts.compactMap { port -> DockerPortCopyCandidate? in
             guard let urlString = port.localhostURLString else { return nil }
             return DockerPortCopyCandidate(label: port.hostPort, urlString: urlString)
         }
-        guard candidates.count == 1, candidates.count == ports.count else { return [] }
+        guard candidates.count == 1, candidates.count == displayPorts.count else { return [] }
         return candidates
+    }
+
+    private static func uniqueDisplayPorts(_ ports: [DockerPublishedPort]) -> [DockerPublishedPort] {
+        var identities: Set<String> = []
+        return ports.filter { identities.insert($0.presentationIdentity).inserted }
     }
 }
 
@@ -227,6 +281,7 @@ public enum ServiceCommandError: Error, Equatable, Sendable {
     case timedOut
     case outputLimitExceeded(streams: Set<OwnedHelperStream>)
     case pipeDrainTimedOut
+    case commandFailed(exitCode: Int32)
 }
 
 public struct DockerPublishedPortParser: Sendable {
@@ -265,29 +320,48 @@ public struct DockerPublishedPortParser: Sendable {
         let hostSide = String(segment[..<arrowRange.lowerBound])
         let containerSide = String(segment[arrowRange.upperBound...])
         guard
-            let hostPort = publishedHostPort(from: hostSide),
-            let containerPort = containerPort(from: containerSide),
-            let sortPort = lowerBoundPort(from: hostPort)
+            let hostEndpoint = publishedHostEndpoint(from: hostSide),
+            let containerEndpoint = containerEndpoint(from: containerSide),
+            let sortPort = lowerBoundPort(from: hostEndpoint.port)
         else { return nil }
 
-        return DockerPublishedPort(hostPort: hostPort, containerPort: containerPort, sortPort: sortPort)
+        return DockerPublishedPort(
+            hostAddress: hostEndpoint.address,
+            hostPort: hostEndpoint.port,
+            containerPort: containerEndpoint.port,
+            transportProtocol: containerEndpoint.transportProtocol,
+            sortPort: sortPort
+        )
     }
 
-    private func publishedHostPort(from hostSide: String) -> String? {
-        let portText: String
-        if let colonIndex = hostSide.lastIndex(of: ":") {
-            portText = String(hostSide[hostSide.index(after: colonIndex)...])
+    private func publishedHostEndpoint(from hostSide: String) -> (address: String?, port: String)? {
+        let address: String?
+        let port: String
+        if hostSide.hasPrefix("["), let bracketIndex = hostSide.firstIndex(of: "]") {
+            let portStart = hostSide.index(after: bracketIndex)
+            guard portStart < hostSide.endIndex, hostSide[portStart] == ":" else { return nil }
+            address = String(hostSide[hostSide.index(after: hostSide.startIndex)..<bracketIndex])
+            port = String(hostSide[hostSide.index(after: portStart)...])
+        } else if let colonIndex = hostSide.lastIndex(of: ":") {
+            let parsedAddress = String(hostSide[..<colonIndex])
+            address = parsedAddress.isEmpty ? nil : parsedAddress
+            port = String(hostSide[hostSide.index(after: colonIndex)...])
         } else {
-            portText = hostSide
+            address = nil
+            port = hostSide
         }
-        guard lowerBoundPort(from: portText) != nil else { return nil }
-        return portText
+        guard lowerBoundPort(from: port) != nil else { return nil }
+        return (address, port)
     }
 
-    private func containerPort(from containerSide: String) -> String? {
-        let portText = containerSide.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? containerSide
-        guard lowerBoundPort(from: portText) != nil else { return nil }
-        return portText
+    private func containerEndpoint(from containerSide: String) -> (port: String, transportProtocol: String?)? {
+        let parts = containerSide.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        let port = parts.first.map(String.init) ?? containerSide
+        guard lowerBoundPort(from: port) != nil else { return nil }
+        let transportProtocol = parts.count == 2 && !parts[1].isEmpty
+            ? String(parts[1]).lowercased()
+            : nil
+        return (port, transportProtocol)
     }
 
     private func lowerBoundPort(from text: String) -> UInt16? {
@@ -428,6 +502,8 @@ public struct ServiceMonitor: Sendable {
                 dockerContainerRows = try collectDockerContainerRows()
             } catch ServiceCommandError.timedOut {
                 docker = ServiceStatus(name: "Docker", detail: "Details timeout", state: .unavailable, kind: .dockerDaemon)
+            } catch ServiceCommandError.commandFailed(let exitCode) {
+                docker = ServiceStatus(name: "Docker", detail: "Daemon; details failed (\(exitCode))", state: .running, kind: .dockerDaemon)
             } catch {
                 docker = ServiceStatus(name: "Docker", detail: "Details unavailable", state: .unavailable, kind: .dockerDaemon)
             }
@@ -466,7 +542,7 @@ public struct ServiceMonitor: Sendable {
             timeout: dockerCommandTimeout,
             environmentPath: ServiceMonitor.dockerEnvironmentPath
         )
-        guard result.succeeded else { return [] }
+        guard result.succeeded else { throw ServiceCommandError.commandFailed(exitCode: result.exitCode) }
         let containers = DockerPublishedPortParser().parse(result.stdout)
         return DockerContainerPortRow.displayRows(for: containers)
     }
