@@ -366,8 +366,7 @@ import Testing
         #expect(copied.count == 4)
         #expect(viewModel.copyFeedbackMessage == "복사됨")
 
-        try? await Task.sleep(nanoseconds: 50_000_000)
-        #expect(viewModel.copyFeedbackMessage == nil)
+        #expect(await eventually { viewModel.copyFeedbackMessage == nil })
     }
 
 }
