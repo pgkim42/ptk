@@ -71,6 +71,15 @@ if swift_job:
         len(build_steps) == 1 and re.search(r"^        run: swift build$", build_steps[0].group("body"), re.MULTILINE),
         "active Build package step runs swift build",
     )
+    package_steps = [step for step in steps if step.group("name") == "Verify universal release package"]
+    require(len(package_steps) == 1, "exactly one universal release package step exists")
+    if len(package_steps) == 1:
+        body = package_steps[0].group("body")
+        require(re.search(r"^        timeout-minutes: 2$", body, re.MULTILINE), "universal package step has a two-minute timeout")
+        require(
+            re.search(r"^        run: scripts/package-release\.sh 0\.0\.0 0$", body, re.MULTILINE) is not None,
+            "universal package step runs the real release packager",
+        )
 
 forbidden = (
     r"continue-on-error:\s*true",
@@ -87,6 +96,7 @@ for pattern in forbidden:
 for command in (
     "tests/open-source-readiness.sh",
     "tests/release-readiness.sh",
+    "tests/release-publication-readiness.sh",
     "tests/ci-workflow-readiness.sh",
 ):
     require(command in workflow, f"repository metadata runs {command}")
@@ -94,6 +104,7 @@ for command in (
 require("uses: actions/checkout@v6.0.2" in workflow, "workflow uses the pinned checkout action")
 require("uses: actions/checkout@v4" not in workflow, "workflow does not use checkout v4")
 require(re.search(r"\bxcodebuild\b", workflow) is None, "workflow does not run xcodebuild")
+require("GH_TOKEN: ${{ github.token }}" in workflow, "publication check receives the GitHub token")
 
 if failures:
     for failure in failures:
@@ -103,6 +114,7 @@ PY
 }
 
 assert_file .github/workflows/ci.yml
+assert_file tests/release-publication-readiness.sh
 validate_workflow
 assert_contains macos/Tests/PTKAppTests/MenuBarControllerTests.swift "@Suite(.serialized) struct MenuBarControllerTests"
 

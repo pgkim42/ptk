@@ -25,6 +25,10 @@ jobs:
         run: swift build
         working-directory: macos
 
+      - name: Verify universal release package
+        timeout-minutes: 2
+        run: scripts/package-release.sh 0.0.0 0
+
   repository-metadata:
     name: Repository metadata
     runs-on: macos-latest
@@ -38,6 +42,11 @@ jobs:
 
       - name: Check release readiness
         run: tests/release-readiness.sh
+
+      - name: Check published release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: tests/release-publication-readiness.sh "${{ github.repository }}"
 
       - name: Check CI workflow readiness
         run: tests/ci-workflow-readiness.sh

@@ -20,11 +20,13 @@ PTK is currently a Swift-only macOS app. The old Rust/Tauri/Node runtime has bee
 
 ## Why PTK?
 
-Local development often leaves behind ports that are hard to reason about:
-Next.js, Vite, backend servers, database services, and old test processes can
-all compete for the same machine. Killing the wrong PID is worse than leaving a
-port alone, so PTK prefers a small native surface that makes the current state
-obvious and only enables process termination when the target can be revalidated.
+When multiple projects and coding-agent sessions share a machine, coding agents
+can start or restart development servers independently. Next.js, Vite, backend
+servers, database services, and old test processes can then collide on the same
+ports or leave orphaned listeners behind. PTK provides one place to inspect those
+ports and clean them up safely. Killing the wrong PID is worse than leaving a port
+alone, so PTK prefers a small native surface that makes the current state obvious
+and only enables process termination when the target can be revalidated.
 
 The project is intentionally narrow: inspect local development ports, expose the
 common cleanup action, and document the safety boundary clearly enough that the
@@ -33,22 +35,23 @@ tool stays trustworthy as it grows.
 ## Status
 
 - Current release preparation: `0.6.0` (not yet released)
-- Latest published artifacts: `0.5.0`
-- Platform: macOS 13+
+- Published binary artifacts: none
+- Platform: macOS 13+ on Apple Silicon and Intel
 - Runtime: Swift, AppKit, SwiftUI
 - Entry point: `macos/`
 - UI surface: menu bar status item with a compact utility panel
-- Distribution: unsigned manual release artifacts for GitHub Releases
+- Distribution preparation: unsigned universal DMG and ZIP artifacts
 - Scope: personal tool, maintained as a public open-source repository
 - License: `0BSD` (`SPDX-License-Identifier: 0BSD`)
 
-`CHANGELOG.md` distinguishes the current release preparation from published
-artifacts. The `0.5.0` artifact names below remain the latest downloadable
-release until `0.6.0` is published.
+`CHANGELOG.md` records completed development lines and the current release
+preparation. No binary has been published on GitHub Releases yet, so the source
+workflow below is currently the only supported installation path.
 
-PTK is distributed as unsigned manual release artifacts for now. It does not
-use paid Developer ID signing, notarization, App Store distribution, Sparkle, or
-an update server yet.
+The packaging script prepares a universal binary for Apple Silicon and Intel
+Macs and applies only an ad-hoc integrity signature. PTK does not use paid
+Developer ID signing, notarization, App Store distribution, Sparkle, or an
+update server yet.
 
 ## Project Health
 
@@ -99,6 +102,24 @@ when they would only repeat nearby text. Settings controls for notifications
 also expose labels, hints, validation errors, permission status, and the macOS
 Settings action.
 
+### Optional AI Usage
+
+The AI Credits section is off by default. Enabling **AI usage display** in
+Settings explicitly allows PTK to read existing local login credentials and
+request usage data every 10 minutes. PTK keeps the resulting snapshot only in
+memory and does not write to either provider's credential store.
+
+- Claude reads the existing `Claude Code-credentials` item from macOS Keychain
+  and requests usage from `api.anthropic.com`.
+- Codex currently supports file-backed authentication only. It reads
+  `auth.json` from `CODEX_HOME` (or `~/.codex` by default) and requests usage
+  from `chatgpt.com`. Keyring-backed Codex sessions are not read and are shown
+  as unsupported file authentication instead of being reported as signed out.
+
+Codex supports file, keyring, and automatic credential storage, but PTK does
+not add a runtime dependency on the Codex App Server. The Codex card is therefore
+an explicitly limited integration for now.
+
 ### Port-Change Notifications
 
 `0.6.0` release preparation adds an opt-in local notification for selected
@@ -142,11 +163,15 @@ MinIO, or LocalStack.
 
 When Docker is running, PTK also shows child rows under the Docker service row
 for running containers with host-published ports. The display is always
-`host -> container`, such as `3000 -> 80` or `4000 -> 4000`. A single numeric
-host port can be copied as `http://localhost:<port>` from the Docker child row.
-Range, hidden, summary, invalid, or ambiguous multi-port rows do not expose a
-copy action. Containers without published host ports are hidden, and Docker
-child rows are not included in the Services running/total counter.
+`bind:host -> container/protocol`, such as `*:3000 -> 80/tcp` or
+`localhost:9229 -> 9229/tcp`. Equivalent IPv4 and IPv6 bindings are collapsed
+within their wildcard or loopback scope. PTK exposes `http://localhost:<port>`
+only for a single numeric TCP mapping reachable through one of those scopes.
+Remote-address, UDP, range, hidden, summary, invalid, or ambiguous multi-port
+rows do not expose a copy action. A `docker ps` failure is shown on the running
+Docker row instead of being disguised as an empty container list. Containers
+without published host ports are hidden, and Docker child rows are not included
+in the Services running/total counter.
 
 Custom service checks remain read-only and are visually grouped separately from
 built-in services. When no custom services are saved, the compact panel shows a
@@ -186,6 +211,7 @@ The settings sheet supports:
 - custom read-only service port checks
 - refresh interval selection: `1s`, `3s`, `5s`, `10s`
 - theme selection: system, light, dark
+- AI usage display: explicit opt-in, off by default
 - persistence through `UserDefaults`
 - quick switching for saved watched-port profiles
 - port-change notifications: opt-in switch, selected-port expression, and macOS permission status
@@ -238,29 +264,15 @@ When changing the default profile, keep these files in sync:
 
 ## Install
 
-Download `PTK-macos-0.5.0-unsigned.dmg` from GitHub Releases.
-
-1. Open the DMG.
-2. Drag `PTK.app` to `Applications`.
-3. Open `Applications`.
-4. Right-click PTK.app and choose **Open**.
-5. Confirm **Open** when macOS shows the unsigned app warning.
-
-This release is unsigned. macOS may block the first launch because it cannot
-verify the developer. The right-click **Open** flow is required only when
-Gatekeeper blocks the normal double-click launch.
-
-PTK appears in the macOS menu bar after launch instead of opening a normal app
-window.
-
-PTK also publishes `PTK-macos-0.5.0-unsigned.zip` for users who prefer a plain
-archive. Unzip it, move `PTK.app` to `/Applications`, then use the same first
-launch flow.
+PTK does not have a published binary release yet. Run it from source with the
+commands below. The release packaging flow already produces an unsigned
+universal DMG and ZIP, and this section will gain binary installation steps only
+after those files are actually published on GitHub Releases.
 
 ### Manual Updates
 
-PTK does not include automatic updates yet. To update, download the latest
-GitHub Release, quit PTK, and replace the app manually in `/Applications`.
+PTK does not include automatic updates yet. Source users update their checkout
+and rebuild the app manually.
 
 ## Run From Source
 
@@ -300,6 +312,7 @@ Release preparation and project management checks can be run with:
 ```bash
 tests/release-readiness.sh
 tests/package-readiness.sh
+tests/release-publication-readiness.sh
 tests/github-management-readiness.sh
 ```
 
@@ -334,8 +347,9 @@ macos/
 │           │   ├── Domain/      # port expressions, menu model, port state
 │           │   ├── Services/    # lsof/ps lookup, scan, kill safety
 │           │   └── Settings/    # UserDefaults-backed settings
-│           └── ServiceMonitor/
-│               └── Services/    # Docker ports and local DB status checks
+│           ├── ServiceMonitor/
+│           │   └── Services/    # Docker ports and local DB status checks
+│           └── AIUsage/          # opt-in Claude and Codex quota snapshots
 └── Tests/
     ├── PTKAppTests/
     └── PTKCoreTests/
@@ -373,6 +387,7 @@ Current test coverage focuses on:
 - app view model behavior
 - notification reliable transitions, consent and permission, delivery
   suppression, and click routing
+- opt-in AI usage parsing, credential-path selection, and error classification
 
 ## Not In Scope Yet
 

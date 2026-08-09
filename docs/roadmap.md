@@ -5,14 +5,14 @@ maintainable open-source project shape over broad feature count.
 
 The current preparation target is `0.6.0`, as named in the versioned release
 preparation entry in `CHANGELOG.md`. This file tracks direction and completion
-state without serving as a second version authority; `0.5.0` remains the latest
-published release.
+state without serving as a second version authority. PTK has no published binary
+release yet.
 
 ## v0.6.0 — current release preparation
 
 Goal: add a bounded, local port-change notification without changing PTK's
 Swift-native runtime or process-termination safety boundary. This line is not
-released; `0.5.0` remains the latest published artifact.
+released, and no earlier binary artifact is published.
 
 Release preparation scope:
 
@@ -35,8 +35,10 @@ Release preparation scope:
   notification history.
 - Preserve `SIGTERM`-only, fail-closed termination and the Swift-only native
   runtime.
+- Universal Apple Silicon and Intel release packaging, with publication
+  metadata verified in CI.
 
-## v0.5.0 — previous release line
+## v0.5.0 — completed development line
 
 Delivered in that line:
 
@@ -61,8 +63,8 @@ Current maintenance priorities:
 ## Archived planning milestones
 
 The early `v0.1.0`, `v0.2.0`, and `v0.4.0` plans were development milestones.
-Their completed work is consolidated into the `0.5.0` changelog and previous
-release line above instead of remaining as open roadmap work.
+Their completed work is consolidated into the `0.5.0` changelog and completed
+development line above instead of remaining as open roadmap work.
 
 ## Later considerations
 

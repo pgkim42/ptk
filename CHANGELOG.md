@@ -4,7 +4,7 @@ All notable PTK changes are tracked here.
 
 ## [0.6.0] — Release preparation
 
-This line is not released yet; `0.5.0` remains the latest published artifact.
+This line is not released yet. PTK has no published binary artifacts.
 
 ### Port-change notifications
 
@@ -27,9 +27,30 @@ This line is not released yet; `0.5.0` remains the latest published artifact.
 - Preserve the Swift-native runtime and existing fail-closed `SIGTERM`-only
   process-termination safety model.
 
-## [0.5.0]
+### AI usage
 
-Latest published Swift-only macOS release line.
+- Add an AI Credits glance for Claude and Codex behind an explicit setting that
+  is off by default. Enabling it allows read-only access to existing local
+  credentials and 10-minute usage refreshes.
+- Honor `CODEX_HOME` for file-backed Codex authentication, distinguish missing
+  file support from general sign-out, parse dynamic limit durations, and report
+  malformed provider responses accurately.
+
+### Reliability and release preparation
+
+- Keep helper and TCP probe timeouts bounded, classify an empty `lsof` result
+  correctly, and preserve the existing confirmation, revalidation, mismatch
+  blocking, and `SIGTERM`-only termination policy.
+- Preserve Docker bind addresses and protocols, restrict localhost copy actions
+  to reachable TCP mappings, and surface `docker ps` failures.
+- Make dense panel content scrollable, keep notification permission state fresh
+  while notifications are off, and prevent duplicate kill confirmations.
+- Build universal Apple Silicon and Intel release artifacts and compare the
+  documented publication state with GitHub Releases in CI.
+
+## [0.5.0] — Completed development line
+
+This development line was completed but was not published as a GitHub Release.
 
 ### Added
 
@@ -55,7 +76,7 @@ Latest published Swift-only macOS release line.
 
 ### Verification
 
-Run these commands from the repository root for the `0.5.0` release line:
+Run these commands from the repository root for the `0.5.0` development line:
 
 ```bash
 cd macos && swift test
@@ -67,7 +88,8 @@ tests/release-readiness.sh
 
 ### Known limitations
 
-- Release artifacts are unsigned and require the documented first-launch flow.
+- Prepared release artifacts use ad-hoc integrity signing only and have no
+  Developer ID signature or notarization.
 - Updates are manual; PTK has no update server or in-app updater.
 - Scanning is limited to local development ports.
 - Service diagnostics are read-only and do not manage containers or databases.

@@ -29,7 +29,6 @@ DIST_DIR="$ROOT_DIR/dist"
 APP_PATH="$DIST_DIR/PTK.app"
 ZIP_PATH="$DIST_DIR/PTK-macos-$DISPLAY_VERSION-unsigned.zip"
 DMG_PATH="$DIST_DIR/PTK-macos-$DISPLAY_VERSION-unsigned.dmg"
-BINARY_PATH="$ROOT_DIR/macos/.build/release/PTK"
 TEMP_DIR=""
 ROLLBACK_ACTIVE=0
 INSTALLED_PATHS=()
@@ -87,11 +86,36 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 STAGED_ZIP_PATH="$OUTPUT_DIR/$(basename "$ZIP_PATH")"
 STAGED_DMG_PATH="$OUTPUT_DIR/$(basename "$DMG_PATH")"
 STAGED_PATHS=("$STAGED_APP_PATH" "$STAGED_ZIP_PATH" "$STAGED_DMG_PATH")
+ARM64_BUILD_DIR="$TEMP_DIR/build-arm64"
+X86_64_BUILD_DIR="$TEMP_DIR/build-x86_64"
+ARM64_BINARY_PATH="$ARM64_BUILD_DIR/arm64-apple-macosx/release/PTK"
+X86_64_BINARY_PATH="$X86_64_BUILD_DIR/x86_64-apple-macosx/release/PTK"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$STAGING_DIR" "$BACKUP_DIR"
 
-swift build --package-path "$ROOT_DIR/macos" -c release --product PTK
-cp "$BINARY_PATH" "$MACOS_DIR/PTK"
+swift build \
+  --package-path "$ROOT_DIR/macos" \
+  --scratch-path "$ARM64_BUILD_DIR" \
+  --triple arm64-apple-macosx \
+  -c release \
+  --product PTK
+swift build \
+  --package-path "$ROOT_DIR/macos" \
+  --scratch-path "$X86_64_BUILD_DIR" \
+  --triple x86_64-apple-macosx \
+  -c release \
+  --product PTK
+lipo -create "$ARM64_BINARY_PATH" "$X86_64_BINARY_PATH" -output "$MACOS_DIR/PTK"
 chmod +x "$MACOS_DIR/PTK"
+
+ARCHITECTURES="$(lipo -archs "$MACOS_DIR/PTK")"
+[[ " $ARCHITECTURES " == *" arm64 "* ]] || {
+  printf 'error: release binary is missing arm64: %s\n' "$ARCHITECTURES" >&2
+  exit 70
+}
+[[ " $ARCHITECTURES " == *" x86_64 "* ]] || {
+  printf 'error: release binary is missing x86_64: %s\n' "$ARCHITECTURES" >&2
+  exit 70
+}
 
 cat > "$CONTENTS_DIR/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -131,9 +155,15 @@ plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null
 [[ "$(plutil -extract CFBundleExecutable raw -o - "$CONTENTS_DIR/Info.plist")" == "PTK" ]]
 [[ "$(plutil -extract CFBundlePackageType raw -o - "$CONTENTS_DIR/Info.plist")" == "APPL" ]]
 [[ -x "$MACOS_DIR/PTK" ]]
+codesign --force --sign - "$STAGED_APP_PATH"
+codesign --verify --strict "$STAGED_APP_PATH"
 
-ditto -c -k --keepParent "$STAGED_APP_PATH" "$STAGED_ZIP_PATH"
+ditto -c -k --keepParent --norsrc --noextattr "$STAGED_APP_PATH" "$STAGED_ZIP_PATH"
 unzip -tqq "$STAGED_ZIP_PATH"
+if zipinfo -1 "$STAGED_ZIP_PATH" | grep -E '(^|/)\._|^__MACOSX/' >/dev/null; then
+  printf 'error: ZIP contains AppleDouble metadata\n' >&2
+  exit 70
+fi
 
 cp -R "$STAGED_APP_PATH" "$STAGING_DIR/PTK.app"
 ln -s /Applications "$STAGING_DIR/Applications"

@@ -25,11 +25,14 @@ Docker가 호스트에 공개한 컨테이너 포트를 표시합니다. 종료 
 
 ## 왜 PTK인가?
 
-로컬 개발 환경에서는 Next.js, Vite, 백엔드 서버, DB 서비스, 오래된 테스트
-프로세스가 같은 머신에서 쉽게 얽힙니다. 잘못된 PID를 종료하는 것은 포트를
-남겨두는 것보다 더 위험하므로, PTK는 작은 네이티브 메뉴 막대 화면에서 현재
-상태를 먼저 명확히 보여주고, 종료 대상이 재검증될 때만 정리 동작을
-허용합니다.
+여러 프로젝트와 코딩 에이전트 세션을 동시에 쓰면, 각 에이전트가 개발
+서버를 독립적으로 시작하거나 재시작하면서 포트가 충돌하고, 세션이 끝난
+뒤에도 서버가 수신 상태로 남을 수 있습니다. 여기에 Next.js, Vite, 백엔드
+서버, DB 서비스, 오래된 테스트 프로세스까지 같은 머신에서 쉽게 얽힙니다.
+PTK는 이 상태를 한곳에서 확인하고 안전하게 정리하기 위한 도구입니다.
+잘못된 PID를 종료하는 것은 포트를 남겨두는 것보다 더 위험하므로, 작은
+네이티브 메뉴 막대 화면에서 현재 상태를 먼저 명확히 보여주고, 종료 대상이
+재검증될 때만 정리 동작을 허용합니다.
 
 이 프로젝트는 의도적으로 좁게 유지합니다. 로컬 개발 포트를 확인하고, 흔한
 정리 동작을 제공하며, 안전 경계를 문서와 테스트로 분명하게 유지하는 것이
@@ -38,20 +41,23 @@ Docker가 호스트에 공개한 컨테이너 포트를 표시합니다. 종료 
 ## 현재 상태
 
 - 현재 릴리스 준비 버전: `0.6.0` (아직 출시되지 않음)
-- 최신 공개 배포 파일: `0.5.0`
-- 플랫폼: macOS 13 이상
+- 공개 바이너리 배포: 없음
+- 플랫폼: Apple Silicon 및 Intel 기반 macOS 13 이상
 - 런타임: Swift, AppKit, SwiftUI
 - 진입점: `macos/`
 - UI: 메뉴 막대 상태 항목과 compact utility panel
-- 배포: GitHub Releases용 unsigned 수동 배포 산출물
+- 배포 준비: unsigned universal DMG 및 ZIP 산출물
 - 저장소 성격: 개인용 도구이지만 공개 오픈소스 저장소 기준으로 관리
 - 라이선스: `0BSD` (`SPDX-License-Identifier: 0BSD`)
 
-`CHANGELOG.md`는 현재 릴리스 준비와 공개 배포 파일을 구분합니다. `0.6.0`이
-공개되기 전까지 아래 `0.5.0` 파일 이름이 최신 다운로드 가능한 릴리스입니다.
+`CHANGELOG.md`는 완료된 개발 버전과 현재 릴리스 준비를 기록합니다. 아직
+GitHub Releases에 공개한 바이너리가 없으므로 현재 지원하는 설치 경로는 아래
+소스 실행뿐입니다.
 
-현재 릴리스는 서명되지 않았습니다. PTK는 아직 유료 Developer ID 서명,
-notarization, App Store 배포, Sparkle, 업데이트 서버를 사용하지 않습니다.
+패키징 스크립트는 Apple Silicon과 Intel Mac을 모두 지원하는 universal
+binary를 만들고 ad-hoc 무결성 서명만 적용합니다. PTK는 아직 유료 Developer
+ID 서명, notarization, App Store 배포, Sparkle, 업데이트 서버를 사용하지
+않습니다.
 
 ## 프로젝트 상태
 
@@ -98,6 +104,23 @@ PTK는 설정된 포트 표현식을 주기적으로 스캔하고, 감시 대상
 알림 설정에도 이름, 설명, 입력 오류, 권한 상태, macOS 설정 열기 동작을
 구분해서 제공합니다.
 
+### 선택형 AI 사용량
+
+AI Credits 영역은 기본적으로 꺼져 있습니다. 설정에서 **AI 사용량 표시**를
+직접 켜면 PTK가 기존 로컬 로그인 정보를 읽고 10분마다 사용량을 조회합니다.
+조회 결과는 메모리에만 보관하며, 각 도구의 자격증명 저장소에는 쓰지 않습니다.
+
+- Claude는 macOS Keychain의 기존 `Claude Code-credentials` 항목을 읽고
+  `api.anthropic.com`에서 사용량을 조회합니다.
+- Codex는 현재 파일 기반 인증만 지원합니다. `CODEX_HOME` 또는 기본
+  `~/.codex`의 `auth.json`을 읽어 `chatgpt.com`에서 사용량을 조회합니다.
+  Keychain 기반 Codex 세션은 읽지 않으며, 로그아웃으로 오진하지 않고 지원되는
+  파일 인증이 없다고 표시합니다.
+
+Codex 자체는 file, keyring, auto 자격증명 저장을 지원하지만, PTK는 Codex App
+Server 런타임 의존성을 추가하지 않습니다. 따라서 현재 Codex 카드는 이 제한을
+명시한 선택형 연동입니다.
+
 ### 포트 변경 알림
 
 `0.6.0` 릴리스 준비에는 선택한 포트의 로컬 알림이 포함됩니다. 새로 설치하거나
@@ -139,12 +162,16 @@ MinIO, LocalStack 같은 도구의 읽기 전용 서비스 포트 확인 항목�
 
 Docker가 실행 중이면 Docker 서비스 행 아래에 호스트에 공개된 포트가 있는
 실행 중 컨테이너를 하위 행으로 표시합니다. 포트 표기는 항상
-`호스트 -> 컨테이너` 형식이며, 예를 들면 `3000 -> 80`, `4000 -> 4000`처럼
-보입니다. 단일 숫자 호스트 포트는 Docker 하위 행에서
-`http://localhost:<port>` 주소로 복사할 수 있습니다. 범위, 숨겨진 항목, 요약
-행, 잘못된 포트, 모호한 다중 포트 행에는 복사 동작을 표시하지 않습니다.
-호스트에 공개된 포트가 없는 컨테이너는 숨기고, Docker 하위 행은 서비스의
-실행 중 항목 수와 전체 항목 수에 포함하지 않습니다.
+`bind:호스트 -> 컨테이너/protocol` 형식이며, 예를 들면
+`*:3000 -> 80/tcp`, `localhost:9229 -> 9229/tcp`처럼 보입니다. wildcard와
+loopback scope 안에서 같은 IPv4/IPv6 bind는 한 번만 표시하며, 이들 scope로
+접근 가능한 단일 숫자 TCP mapping에만
+`http://localhost:<port>` 복사 동작을 제공합니다. 원격 주소, UDP, 범위,
+숨겨진 항목, 요약 행, 잘못된 포트, 모호한 다중 포트 행에는 복사 동작을
+표시하지 않습니다. `docker ps`가 실패하면 빈 컨테이너 목록으로 숨기지 않고
+실행 중인 Docker 행에 상세 조회 실패를 표시합니다. 호스트에 공개된 포트가
+없는 컨테이너는 숨기고, Docker 하위 행은 서비스의 실행 중 항목 수와 전체
+항목 수에 포함하지 않습니다.
 
 사용자 정의 서비스 확인도 읽기 전용으로 유지하며, 기본 서비스와 구분되는
 그룹으로 보여줍니다. 사용자 정의 서비스가 없으면 작은 패널에는 설정에서
@@ -186,6 +213,7 @@ PTK는 `SIGTERM`만 보냅니다. 강제 종료, 불일치 무시, 모호한 수
 - 사용자 정의 읽기 전용 서비스 포트 확인
 - 새로고침 주기: `1s`, `3s`, `5s`, `10s`
 - 테마 선택: 시스템, 라이트, 다크
+- AI 사용량 표시: 명시적 opt-in, 기본값 꺼짐
 - `UserDefaults` 기반 설정 저장
 - 저장된 감시 포트 프로필 빠른 전환
 - 포트 변경 알림: 사용 여부, 선택 포트 표현식, macOS 권한 상태
@@ -237,28 +265,15 @@ PID, 프로세스 경로 또는 명령, 종료 불가 사유 같은 포트 상�
 
 ## 설치
 
-GitHub Releases에서 `PTK-macos-0.5.0-unsigned.dmg`를 다운로드합니다.
-
-1. DMG를 엽니다.
-2. `PTK.app`을 `Applications`로 드래그합니다.
-3. `Applications`를 엽니다.
-4. PTK.app을 우클릭하고 **열기**를 선택합니다.
-5. macOS가 unsigned 앱 경고를 표시하면 다시 **열기**를 확인합니다.
-
-현재 릴리스는 서명되지 않았습니다. macOS가 개발자를 확인할 수 없다는
-이유로 첫 실행을 차단할 수 있습니다. 일반 더블클릭 실행이 막힐 때만
-우클릭 **열기** 흐름이 필요합니다.
-
-실행 후 PTK는 일반 앱 창 대신 macOS 메뉴 막대에 표시됩니다.
-
-압축 파일을 선호하는 사용자를 위해 `PTK-macos-0.5.0-unsigned.zip`도
-제공합니다. 압축을 풀고 `PTK.app`을 `/Applications`로 옮긴 뒤 같은 첫
-실행 흐름을 사용하면 됩니다.
+PTK는 아직 공개 바이너리 릴리스가 없습니다. 아래 명령으로 소스에서
+실행하세요. 릴리스 패키징은 이미 unsigned universal DMG와 ZIP을 만들지만,
+실제 파일을 GitHub Releases에 공개한 뒤에만 이 절에 바이너리 설치 방법을
+추가합니다.
 
 ### 수동 업데이트
 
-PTK는 아직 자동 업데이트를 포함하지 않습니다. 업데이트하려면 최신 GitHub
-Release를 다운로드하고 PTK를 종료한 뒤, `/Applications`의 앱을 수동으로 교체합니다.
+PTK는 아직 자동 업데이트를 포함하지 않습니다. 소스 사용자는 checkout을
+갱신하고 앱을 다시 빌드해야 합니다.
 
 ## 소스에서 실행
 
@@ -298,6 +313,7 @@ tests/open-source-readiness.sh
 ```bash
 tests/release-readiness.sh
 tests/package-readiness.sh
+tests/release-publication-readiness.sh
 tests/github-management-readiness.sh
 ```
 
@@ -333,8 +349,9 @@ macos/
 │           │   ├── Domain/      # 포트 표현식, 메뉴 모델, 포트 상태
 │           │   ├── Services/    # lsof/ps 조회, 스캔, 종료 안전 로직
 │           │   └── Settings/    # UserDefaults 기반 설정
-│           └── ServiceMonitor/
-│               └── Services/    # Docker 포트와 로컬 DB 상태 확인
+│           ├── ServiceMonitor/
+│           │   └── Services/    # Docker 포트와 로컬 DB 상태 확인
+│           └── AIUsage/          # opt-in Claude/Codex 사용량 조회
 └── Tests/
     ├── PTKAppTests/
     └── PTKCoreTests/
@@ -371,6 +388,7 @@ macos/
 - 서비스 명령 timeout 처리
 - 앱 view model 동작
 - 알림의 신뢰할 수 있는 전환, 동의와 권한, 전달 억제, 클릭 경로
+- 선택형 AI 사용량 파싱, 자격증명 경로 선택, 오류 분류
 
 ## 아직 범위 밖인 것
 

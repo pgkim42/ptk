@@ -63,13 +63,16 @@ if positions[0] >= 0 and positions[1] >= 0:
         "never prompt",
         "Open the PTK panel only when a notification is clicked",
         "SIGTERM`-only",
+        "AI Credits",
+        "CODEX_HOME",
+        "universal Apple Silicon and Intel",
     ):
         require(phrase in current_release, f"0.6.0 changelog section contains: {phrase}")
 
 require_all("README.md", (
     "Current release preparation: `0.6.0`",
-    "Latest published artifacts: `0.5.0`",
-    "macOS 13+",
+    "Published binary artifacts: none",
+    "macOS 13+ on Apple Silicon and Intel",
     "off by default for new and upgraded configurations.",
     "current intersection to notify.",
     "never prompt.",
@@ -77,14 +80,20 @@ require_all("README.md", (
     "routes blocked permission to macOS Settings.",
     "does not erase the saved opt-in intent",
     "notification opens the PTK panel only.",
+    "### Optional AI Usage",
+    "CODEX_HOME",
     "SIGTERM` only",
+    "universal binary",
     "signed PKG installer packaging",
 ))
 require("`0.6.0`" in Path("README.ko.md").read_text(), "Korean README names release 0.6.0")
-require("`0.5.0`" in Path("README.ko.md").read_text(), "Korean README names published release 0.5.0")
+readme_ko = Path("README.ko.md").read_text()
+require("공개 바이너리 배포: 없음" in readme_ko, "Korean README states no binary release")
+require("### 선택형 AI 사용량" in readme_ko, "Korean README documents opt-in AI usage")
 require_all("macos/README.md", (
     "Swift/AppKit",
     "`SIGTERM`",
+    "AI Credits",
 ))
 require_all("macos/Package.swift", (
     "// swift-tools-version: 6.0",
@@ -116,5 +125,7 @@ assert_contains docs/roadmap.md "force kill"
 
 assert_file tests/package-readiness.sh
 tests/package-readiness.sh
+assert_file tests/release-publication-readiness-tests.sh
+tests/release-publication-readiness-tests.sh
 
 pass "release-readiness"

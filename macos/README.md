@@ -8,6 +8,7 @@
 - `PTKCore/Shell`: PTK 메뉴 막대 앱 공통 로직
 - `PTKCore/Features/PortMonitor`: 포트 파싱, 스캔, 프로세스 조회, 종료 안전 로직
 - `PTKCore/Features/ServiceMonitor`: Docker daemon, Docker published port, 주요 로컬 DB 포트 상태 표시 로직
+- `PTKCore/Features/AIUsage`: opt-in Claude/Codex 사용량 조회와 응답 파싱
 - `PTKCoreTests`: core 단위 테스트
 - `PTKAppTests`: 앱 통합, 알림 조정, 네이티브 알림 클라이언트, 접근성 테스트
 
@@ -22,11 +23,18 @@ action에 남겨 둡니다.
 상태이므로 경고보다 낮은 톤으로 표시합니다.
 
 Docker daemon이 실행 중이면 Docker 행 아래에 host에 publish된 container
-포트를 읽기 전용 하위 행으로 표시합니다. 단일 숫자 host 포트는
-`http://localhost:<port>`로 복사할 수 있지만, range/요약/숨김/모호한
-다중 포트 행은 복사 action을 노출하지 않습니다. 하위 행은 stop/kill
-action과 연결하지 않고, Services running/total 카운터에도 포함하지
-않습니다. 포트 표기는 `host -> container` 형식을 유지합니다.
+포트를 읽기 전용 하위 행으로 표시합니다. bind address와 protocol을 보존하며,
+wildcard/loopback의 단일 숫자 TCP host 포트만 `http://localhost:<port>`로
+복사할 수 있습니다. 원격 bind, UDP, range/요약/숨김/모호한 다중 포트 행은
+복사 action을 노출하지 않습니다. `docker ps` 실패도 빈 결과로 숨기지 않습니다.
+하위 행은 stop/kill action과 연결하지 않고, Services running/total 카운터에도
+포함하지 않습니다. 포트 표기는 `bind:host -> container/protocol` 형식이며,
+동일 scope의 IPv4/IPv6 dual-stack bind는 한 번만 표시합니다.
+
+AI Credits는 설정에서 직접 켜야만 표시하고 조회하며 기본값은 꺼짐입니다.
+Claude는 macOS Keychain, Codex는 `CODEX_HOME` 또는 `~/.codex`의 file-backed
+`auth.json`만 읽습니다. 사용량 snapshot은 메모리에만 10분간 cache하며,
+Codex keyring 인증은 현재 지원하지 않습니다.
 
 저장된 감시 포트 프로필은 패널에서 빠르게 전환할 수 있고, 사용자 정의
 서비스는 기본 서비스와 구분되는 read-only 그룹으로 표시합니다. 사용자 정의
@@ -40,8 +48,8 @@ action과 연결하지 않고, Services running/total 카운터에도 포함하�
 ## 포트 변경 알림
 
 `0.6.0` 릴리스 준비에서는 포트 변경 알림을 새 설치와 업데이트 설정에서 기본으로
-끈 상태로 제공합니다. 이 버전은 아직 출시되지 않았으며, `0.5.0`이 최신 공개
-배포 버전으로 남아 있습니다. 처음 켤 때는 알림 포트 표현식이 비어 있는 경우에만 감시
+끈 상태로 제공합니다. 이 버전은 아직 출시되지 않았으며, 현재 공개된 바이너리
+배포도 없습니다. 처음 켤 때는 알림 포트 표현식이 비어 있는 경우에만 감시
 포트 표현식을 복사하고, 그 뒤에는 두 표현식을 독립적으로 유지합니다. 두
 표현식은 쉼표·범위 문법과 5,000포트 파서 제한을 함께 쓰며, 알림을 보내려면
 포트가 현재 두 표현식의 교집합에 있어야 합니다.

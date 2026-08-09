@@ -25,13 +25,13 @@ assert_executable() {
 assert_contains() {
   local path="$1"
   local expected="$2"
-  grep -Fq "$expected" "$path" || fail "$path contains: $expected"
+  grep -Fq -- "$expected" "$path" || fail "$path contains: $expected"
   pass "$path contains: $expected"
 }
 assert_not_contains() {
   local path="$1"
   local unexpected="$2"
-  ! grep -Fq "$unexpected" "$path" || fail "$path does not contain: $unexpected"
+  ! grep -Fq -- "$unexpected" "$path" || fail "$path does not contain: $unexpected"
   pass "$path does not contain: $unexpected"
 }
 
@@ -48,9 +48,61 @@ setup_fixture() {
   cat > "$root/mock-bin/swift" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-mkdir -p "$PTK_TEST_ROOT/macos/.build/release"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$PTK_TEST_ROOT/macos/.build/release/PTK"
-chmod +x "$PTK_TEST_ROOT/macos/.build/release/PTK"
+scratch_path=""
+triple=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --scratch-path)
+      scratch_path="$2"
+      shift 2
+      ;;
+    --triple)
+      triple="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+[[ -n "$scratch_path" && -n "$triple" ]]
+mkdir -p "$scratch_path/$triple/release"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$scratch_path/$triple/release/PTK"
+chmod +x "$scratch_path/$triple/release/PTK"
+EOF
+
+  cat > "$root/mock-bin/lipo" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  -create)
+    [[ "$4" == "-output" ]]
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$5"
+    chmod +x "$5"
+    ;;
+  -archs)
+    printf 'x86_64 arm64\n'
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+EOF
+
+  cat > "$root/mock-bin/codesign" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  --force)
+    [[ "$2" == "--sign" && "$3" == "-" && -x "$4" ]]
+    ;;
+  --verify)
+    [[ "$2" == "--strict" && -x "$3" ]]
+    ;;
+  *)
+    exit 64
+    ;;
+esac
 EOF
 
   cat > "$root/mock-bin/hdiutil" <<'EOF'
@@ -73,7 +125,22 @@ case "$1" in
 esac
 EOF
 
-  chmod +x "$root/mock-bin/swift" "$root/mock-bin/hdiutil"
+  cat > "$root/mock-bin/zipinfo" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${PTK_TEST_ZIPINFO_APPLEDOUBLE:-0}" -eq 1 && "$1" == "-1" ]]; then
+  printf 'PTK.app/Contents/._Info.plist\n'
+  exit 0
+fi
+exec /usr/bin/zipinfo "$@"
+EOF
+
+  chmod +x \
+    "$root/mock-bin/swift" \
+    "$root/mock-bin/lipo" \
+    "$root/mock-bin/codesign" \
+    "$root/mock-bin/hdiutil" \
+    "$root/mock-bin/zipinfo"
   printf '%s\n' "$root"
 }
 
@@ -100,6 +167,8 @@ test_successful_package() {
   [[ "$(plutil -extract CFBundleVersion raw -o - "$plist")" == "42" ]] ||
     fail "generated app contains the build version"
   unzip -tqq "$root/dist/PTK-macos-0.5.0-unsigned.zip"
+  ! zipinfo -1 "$root/dist/PTK-macos-0.5.0-unsigned.zip" | grep -E '(^|/)\._|^__MACOSX/' >/dev/null ||
+    fail "generated ZIP contains AppleDouble metadata"
   [[ -s "$root/dist/PTK-macos-0.5.0-unsigned.dmg" ]] || fail "generated DMG is non-empty"
   assert_no_temporary_output "$root"
   pass "generated release artifacts are structurally valid"
@@ -126,6 +195,20 @@ test_invalid_versions() {
   [[ ! -e "$root/dist" ]] || fail "invalid versions create no output"
   assert_no_temporary_output "$root"
   pass "invalid display and build versions are rejected"
+}
+
+test_appledouble_metadata_is_rejected() {
+  local root
+
+  root="$(setup_fixture appledouble)"
+  if PATH="$root/mock-bin:$PATH" PTK_TEST_ROOT="$root" PTK_TEST_ZIPINFO_APPLEDOUBLE=1 \
+    "$root/scripts/package-release.sh" 0.5.0 42 >/dev/null 2>&1; then
+    fail "AppleDouble metadata is rejected"
+  fi
+
+  [[ ! -e "$root/dist" ]] || fail "AppleDouble metadata creates no output"
+  assert_no_temporary_output "$root"
+  pass "AppleDouble metadata is rejected"
 }
 
 test_failure_preserves_previous_release() {
@@ -190,28 +273,40 @@ assert_contains scripts/package-release.sh 'PTK-macos-$DISPLAY_VERSION-unsigned.
 assert_contains scripts/package-release.sh "hdiutil create"
 assert_contains scripts/package-release.sh "CFBundlePackageType"
 assert_contains scripts/package-release.sh "LSMinimumSystemVersion"
+assert_contains scripts/package-release.sh "--triple arm64-apple-macosx"
+assert_contains scripts/package-release.sh "--triple x86_64-apple-macosx"
+assert_contains scripts/package-release.sh "lipo -create"
+assert_contains scripts/package-release.sh 'codesign --force --sign - "$STAGED_APP_PATH"'
+assert_contains scripts/package-release.sh 'codesign --verify --strict "$STAGED_APP_PATH"'
+assert_contains scripts/package-release.sh 'ditto -c -k --keepParent --norsrc --noextattr'
+assert_contains scripts/package-release.sh "ZIP contains AppleDouble metadata"
+assert_contains scripts/package-release.sh '[[ " $ARCHITECTURES " == *" arm64 "* ]]'
+assert_contains scripts/package-release.sh '[[ " $ARCHITECTURES " == *" x86_64 "* ]]'
 
 assert_contains README.md "Current release preparation: \`0.6.0\`"
-assert_contains README.md "Latest published artifacts: \`0.5.0\`"
+assert_contains README.md "Published binary artifacts: none"
 assert_contains README.md "### Port-Change Notifications"
+assert_contains README.md "### Optional AI Usage"
 assert_contains README.md "opt-in local notification for selected"
 assert_contains README.md "reliable open and closed transitions"
-assert_contains README.md "This release is unsigned"
-assert_contains README.md "Right-click PTK.app and choose **Open**"
+assert_contains README.md "unsigned universal DMG and ZIP"
+assert_contains README.md "does not have a published binary release yet"
 assert_contains README.md "PTK does not include automatic updates yet"
-assert_contains README.md "replace the app manually"
+assert_contains README.md "rebuild the app manually"
 
 assert_contains README.ko.md "현재 릴리스 준비 버전: \`0.6.0\`"
-assert_contains README.ko.md "최신 공개 배포 파일: \`0.5.0\`"
+assert_contains README.ko.md "공개 바이너리 배포: 없음"
 assert_contains README.ko.md "### 포트 변경 알림"
+assert_contains README.ko.md "### 선택형 AI 사용량"
 assert_contains README.ko.md "선택한 포트의 로컬 알림"
 assert_contains README.ko.md "신뢰할 수 있는 열림과 닫힘 전환"
-assert_contains README.ko.md "현재 릴리스는 서명되지 않았습니다"
-assert_contains README.ko.md "PTK.app을 우클릭하고 **열기**를 선택"
+assert_contains README.ko.md "unsigned universal DMG와 ZIP"
+assert_contains README.ko.md "아직 공개 바이너리 릴리스가 없습니다"
 assert_contains README.ko.md "아직 자동 업데이트를 포함하지 않습니다"
-assert_contains README.ko.md "앱을 수동으로 교체"
+assert_contains README.ko.md "앱을 다시 빌드"
 
 assert_contains docs/roadmap.md "Unsigned DMG and ZIP release artifacts"
+assert_contains docs/roadmap.md "Universal Apple Silicon and Intel release packaging"
 assert_contains docs/roadmap.md "## v0.6.0 — current release preparation"
 assert_contains docs/roadmap.md "local port-change notification"
 assert_contains tests/release-readiness.sh "tests/package-readiness.sh"
@@ -219,6 +314,7 @@ assert_not_contains tests/open-source-readiness.sh "tests/package-readiness.sh"
 
 test_successful_package
 test_invalid_versions
+test_appledouble_metadata_is_rejected
 test_failure_preserves_previous_release
 test_symlinked_output_is_rejected
 
