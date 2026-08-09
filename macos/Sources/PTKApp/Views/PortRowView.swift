@@ -6,7 +6,24 @@ struct PortRowView: View {
     let onOpen: (PortStatus) -> Void
     let onCopy: (PortStatus) -> Void
     let onCopyDetails: (PortStatus) -> Void
+    let isKillDisabled: Bool
     let onKill: (KillTarget) -> Void
+
+    init(
+        status: PortStatus,
+        onOpen: @escaping (PortStatus) -> Void,
+        onCopy: @escaping (PortStatus) -> Void,
+        onCopyDetails: @escaping (PortStatus) -> Void,
+        isKillDisabled: Bool = false,
+        onKill: @escaping (KillTarget) -> Void
+    ) {
+        self.status = status
+        self.onOpen = onOpen
+        self.onCopy = onCopy
+        self.onCopyDetails = onCopyDetails
+        self.isKillDisabled = isKillDisabled
+        self.onKill = onKill
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -92,7 +109,8 @@ struct PortRowView: View {
                             .font(.system(size: 10, weight: .bold))
                     }
                     .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.red, size: 22))
-                    .help("프로세스 종료")
+                    .disabled(isKillDisabled)
+                    .help(isKillDisabled ? "다른 프로세스 종료 처리 중" : "프로세스 종료")
                     .accessibilityLabel(PortRowAccessibility.killLabel(for: target))
                     .accessibilityHint(PortRowAccessibility.killHint)
                 } else if let reason = status.ptkKillUnavailableReason {
@@ -101,7 +119,7 @@ struct PortRowView: View {
                         .foregroundStyle(PTKTheme.orange)
                         .frame(width: 22, height: 22)
                         .help(reason)
-                        .accessibilityLabel(PortRowAccessibility.diagnosticLabel(for: status, reason: reason))
+                        .accessibilityHidden(true)
                 }
             }
 

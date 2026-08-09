@@ -34,7 +34,7 @@ struct ServiceStatusRowView: View {
                 }
         }
         .padding(.horizontal, 9)
-        .frame(height: 29)
+        .frame(height: ServiceStatusListMetrics.statusRowHeight)
         .background(Color.clear)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(ServiceRowAccessibility.statusLabel(for: status))

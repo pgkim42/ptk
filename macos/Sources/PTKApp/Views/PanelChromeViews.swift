@@ -58,7 +58,7 @@ struct PanelServiceGroupHeaderView: View {
             Spacer()
         }
         .padding(.horizontal, 9)
-        .frame(height: 18)
+        .frame(height: ServiceStatusListMetrics.groupHeaderHeight)
         .background(PTKTheme.card.opacity(0.55))
     }
 }

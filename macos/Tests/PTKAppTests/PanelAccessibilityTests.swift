@@ -5,6 +5,14 @@ import Testing
 @testable import PTKCore
 
 @Suite struct PanelAccessibilityTests {
+    @Test func serviceListReservesAGroupHeaderAndStatusRow() {
+        #expect(
+            ServiceStatusListMetrics.minimumHeight
+                == ServiceStatusListMetrics.groupHeaderHeight + ServiceStatusListMetrics.statusRowHeight
+        )
+        #expect(ServiceStatusListMetrics.maximumHeight > ServiceStatusListMetrics.minimumHeight)
+    }
+
     @MainActor
     @Test func diagnosticRowRendersTallerThanRegularRow() {
         let regular = PortStatus(port: 3000, isOpen: true, pid: 42, processName: "node")
@@ -45,5 +53,6 @@ import Testing
         #expect(ServiceGroup.custom.label == "사용자 서비스")
         #expect(ServiceState.stopped.label == "중지됨")
         #expect(ServiceState.unavailable.label == "확인 불가")
+        #expect(SettingsAccessibility.aiUsageToggleLabel == "AI 사용량 표시")
     }
 }

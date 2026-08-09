@@ -45,6 +45,7 @@ struct SettingsSheetView: View {
     @State private var expressionError: String?
     @State private var selectedInterval: RefreshInterval
     @State private var selectedTheme: AppTheme
+    @State private var isAIUsageEnabled: Bool
     @State private var profileTitle = ""
     @State private var serviceName = ""
     @State private var servicePort = ""
@@ -67,6 +68,7 @@ struct SettingsSheetView: View {
         _expression = State(initialValue: draft.portExpression)
         _selectedInterval = State(initialValue: draft.refreshInterval)
         _selectedTheme = State(initialValue: draft.theme)
+        _isAIUsageEnabled = State(initialValue: draft.isAIUsageEnabled)
         _customPortProfiles = State(initialValue: draft.customPortProfiles)
         _customServiceEndpoints = State(initialValue: draft.customServiceEndpoints)
         _notificationPreference = State(initialValue: draft.portChangeNotificationPreference)
@@ -176,6 +178,17 @@ struct SettingsSheetView: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("AI 사용량 표시", isOn: $isAIUsageEnabled)
+                    .accessibilityLabel(SettingsAccessibility.aiUsageToggleLabel)
+                    .accessibilityHint(SettingsAccessibility.aiUsageToggleHint)
+                    .accessibilityIdentifier(SettingsAccessibility.aiUsageToggleIdentifier)
+                Text("켜면 Claude와 Codex의 로컬 로그인 정보를 사용해 사용량을 조회합니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("포트 프리셋").font(.caption).foregroundStyle(.secondary)
                 LazyVGrid(
@@ -234,7 +247,8 @@ struct SettingsSheetView: View {
                                 theme: selectedTheme,
                                 customPortProfiles: customPortProfiles,
                                 customServiceEndpoints: customServiceEndpoints,
-                                portChangeNotificationPreference: notificationPreference
+                                portChangeNotificationPreference: notificationPreference,
+                                isAIUsageEnabled: isAIUsageEnabled
                             )
                         )
                     } catch let error as SettingsDraftSaveError {
@@ -243,6 +257,8 @@ struct SettingsSheetView: View {
                             expressionError = "\(error)"
                         case .notificationPorts(let error):
                             notificationExpressionError = "\(error)"
+                        case .customServices(let error):
+                            serviceError = "\(error)"
                         case .storage(let error):
                             settingsError = "\(error)"
                         }
@@ -503,6 +519,10 @@ enum SettingsAccessibility {
     static let refreshIntervalPickerHint = "포트와 서비스 상태를 자동으로 확인할 주기를 선택합니다."
     static let themePickerLabel = "테마"
     static let themePickerHint = "PTK 화면에 사용할 밝기 테마를 선택합니다."
+
+    static let aiUsageToggleLabel = "AI 사용량 표시"
+    static let aiUsageToggleHint = "Claude와 Codex의 로컬 로그인 정보를 사용해 사용량을 조회합니다."
+    static let aiUsageToggleIdentifier = "settings.aiUsage.toggle"
 
     static let portChangeNotificationToggleLabel = "포트 변경 알림"
     static let portChangeNotificationToggleHint = "선택한 포트가 열리거나 닫힐 때 알림을 받도록 켜거나 끕니다."

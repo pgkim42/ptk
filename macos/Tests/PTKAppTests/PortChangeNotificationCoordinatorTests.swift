@@ -96,6 +96,17 @@ struct PortChangeNotificationCoordinatorTests {
         #expect(harness.delivery.candidates.map(\.kind) == [.closed])
     }
 
+    @Test func passivePermissionRefreshPublishesWhileNotificationsAreDisabled() async {
+        let harness = NotificationHarness()
+        harness.eligibility.notificationsEnabled = false
+        harness.permission.status = .denied
+        let coordinator = harness.coordinator(watched: [3000])
+
+        await coordinator.refreshPermissionStatus()
+
+        #expect(coordinator.permissionStatus == .denied)
+    }
+
     @Test func permissionRequestPublishesSuccessAndFailure() async {
         let harness = NotificationHarness()
         harness.permission.status = .notDetermined
@@ -109,6 +120,22 @@ struct PortChangeNotificationCoordinatorTests {
         harness.permission.shouldThrow = true
         await coordinator.requestPermissionIfNeeded()
         #expect(coordinator.lastPermissionRequestError != nil)
+    }
+
+    @Test func successfulPassiveRefreshClearsPreviousRequestError() async {
+        let harness = NotificationHarness()
+        harness.permission.status = .notDetermined
+        harness.permission.shouldThrow = true
+        let coordinator = harness.coordinator(watched: [3000])
+
+        await coordinator.requestPermissionIfNeeded()
+        #expect(coordinator.lastPermissionRequestError != nil)
+
+        harness.permission.status = .authorized
+        await coordinator.refreshPermissionStatus()
+
+        #expect(coordinator.permissionStatus == .authorized)
+        #expect(coordinator.lastPermissionRequestError == nil)
     }
 
     @Test func oppositeDirectionIsNotSuppressed() async {

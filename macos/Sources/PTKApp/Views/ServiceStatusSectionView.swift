@@ -32,7 +32,10 @@ struct ServiceStatusSectionView: View {
                     }
                 }
             }
-            .frame(maxHeight: 174)
+            .frame(
+                minHeight: ServiceStatusListMetrics.minimumHeight,
+                maxHeight: ServiceStatusListMetrics.maximumHeight
+            )
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(PTKTheme.table))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -40,4 +43,11 @@ struct ServiceStatusSectionView: View {
             }
         }
     }
+}
+
+enum ServiceStatusListMetrics {
+    static let groupHeaderHeight: CGFloat = 18
+    static let statusRowHeight: CGFloat = 29
+    static let minimumHeight = groupHeaderHeight + statusRowHeight
+    static let maximumHeight: CGFloat = 174
 }

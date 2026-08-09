@@ -8,6 +8,7 @@ import Foundation
         #expect(settings.watchedPortsExpression == AppDefaults.defaultWatchedPortsExpression)
         #expect(settings.refreshInterval == .threeSeconds)
         #expect(settings.theme == .system)
+        #expect(!settings.isAIUsageEnabled)
     }
 
     @Test func persistsWatchedPortsRefreshIntervalAndTheme() {
@@ -17,11 +18,13 @@ import Foundation
         settings.watchedPortsExpression = "3000,5173"
         settings.refreshInterval = .tenSeconds
         settings.theme = .dark
+        settings.isAIUsageEnabled = true
 
         let reloaded = AppSettings(store: store)
         #expect(reloaded.watchedPortsExpression == "3000,5173")
         #expect(reloaded.refreshInterval == .tenSeconds)
         #expect(reloaded.theme == .dark)
+        #expect(reloaded.isAIUsageEnabled)
     }
 
     @Test func validatedWatchedPortsUpdateRejectsInvalidExpressionWithoutPersisting() throws {
@@ -91,9 +94,71 @@ import Foundation
             try settings.loadCustomServiceEndpoints()
         }
         #expect(throws: AppSettingsError.corruptStoredValue(AppSettings.Key.customServiceEndpoints)) {
-            try settings.saveCustomServiceEndpoint(name: "Redis", port: 6379)
+            try settings.saveCustomServiceEndpoint(name: "Cache", port: 16379)
         }
         #expect(store.string(forKey: AppSettings.Key.customServiceEndpoints) == original)
+    }
+
+    @Test func customServicesRejectBuiltInDatabasePorts() throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
+
+        for endpoint in ServiceMonitor.defaultDatabaseEndpoints {
+            #expect(throws: AppSettingsError.builtInServicePort(endpoint.port)) {
+                try settings.saveCustomServiceEndpoint(name: "Custom \(endpoint.name)", port: Int(endpoint.port))
+            }
+        }
+        #expect(settings.customServiceEndpoints.isEmpty)
+
+        #expect(throws: AppSettingsError.builtInServicePort(5432)) {
+            try settings.replaceSettings(
+                watchedPortsExpression: "3000",
+                refreshInterval: .threeSeconds,
+                theme: .system,
+                profiles: [],
+                serviceEndpoints: [DatabaseEndpoint(name: "Local PostgreSQL", port: 5432)],
+                portChangeNotificationPreference: .init(isEnabled: false, portsExpression: nil)
+            )
+        }
+        #expect(settings.customServiceEndpoints.isEmpty)
+
+        try settings.saveCustomServiceEndpoint(name: "Custom API", port: 15432)
+        #expect(settings.customServiceEndpoints.map(\.port) == [15432])
+    }
+
+    @Test func unchangedLegacyBuiltInServiceDoesNotBlockUnrelatedSettingsSave() throws {
+        let store = InMemorySettingsStore()
+        let legacyEndpoint = DatabaseEndpoint(name: "Legacy Redis", port: 6379)
+        let storedEndpoints = String(
+            data: try JSONEncoder().encode([legacyEndpoint]),
+            encoding: .utf8
+        )!
+        store.set(storedEndpoints, forKey: AppSettings.Key.customServiceEndpoints)
+        let settings = AppSettings(store: store)
+
+        try settings.replaceSettings(
+            watchedPortsExpression: "3000",
+            refreshInterval: .fiveSeconds,
+            theme: .dark,
+            profiles: [],
+            serviceEndpoints: [legacyEndpoint],
+            portChangeNotificationPreference: .init(isEnabled: false, portsExpression: nil),
+            isAIUsageEnabled: true
+        )
+
+        #expect(settings.customServiceEndpoints == [legacyEndpoint])
+        #expect(settings.theme == .dark)
+        #expect(settings.isAIUsageEnabled)
+        #expect(throws: AppSettingsError.builtInServicePort(6379)) {
+            try settings.replaceSettings(
+                watchedPortsExpression: "3000",
+                refreshInterval: .fiveSeconds,
+                theme: .dark,
+                profiles: [],
+                serviceEndpoints: [DatabaseEndpoint(name: "Renamed Redis", port: 6379)],
+                portChangeNotificationPreference: .init(isEnabled: false, portsExpression: nil),
+                isAIUsageEnabled: true
+            )
+        }
     }
 
     @Test func corruptNotificationValuesArePreserved() throws {

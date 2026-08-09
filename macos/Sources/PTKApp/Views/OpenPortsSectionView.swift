@@ -24,7 +24,8 @@ struct OpenPortsSectionView: View {
                                 },
                                 onCopyDetails: { status in
                                     viewModel.copyPortDetails(for: status)
-                                }
+                                },
+                                isKillDisabled: viewModel.isTerminatingProcess
                             ) { target in
                                 viewModel.requestKill(target)
                             }

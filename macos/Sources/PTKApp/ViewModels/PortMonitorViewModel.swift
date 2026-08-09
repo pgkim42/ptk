@@ -167,13 +167,15 @@ struct SettingsDraft: Equatable {
     var customPortProfiles: [PortProfile]
     var customServiceEndpoints: [DatabaseEndpoint]
     var portChangeNotificationPreference: PortChangeNotificationPreference
+    var isAIUsageEnabled: Bool
     init(
         portExpression: String,
         refreshInterval: RefreshInterval,
         theme: AppTheme,
         customPortProfiles: [PortProfile],
         customServiceEndpoints: [DatabaseEndpoint],
-        portChangeNotificationPreference: PortChangeNotificationPreference = .init(isEnabled: false, portsExpression: nil)
+        portChangeNotificationPreference: PortChangeNotificationPreference = .init(isEnabled: false, portsExpression: nil),
+        isAIUsageEnabled: Bool = false
     ) {
         self.portExpression = portExpression
         self.refreshInterval = refreshInterval
@@ -181,6 +183,7 @@ struct SettingsDraft: Equatable {
         self.customPortProfiles = customPortProfiles
         self.customServiceEndpoints = customServiceEndpoints
         self.portChangeNotificationPreference = portChangeNotificationPreference
+        self.isAIUsageEnabled = isAIUsageEnabled
     }
 }
 struct NotificationPermissionUpdate: Equatable, Sendable {
@@ -191,6 +194,7 @@ struct NotificationPermissionUpdate: Equatable, Sendable {
 enum SettingsDraftSaveError: Error {
     case watchedPorts(Error)
     case notificationPorts(Error)
+    case customServices(Error)
     case storage(Error)
 }
 
@@ -235,6 +239,7 @@ final class PortMonitorViewModel: ObservableObject {
     @Published var customPortProfiles: [PortProfile]
     @Published var customServiceEndpoints: [DatabaseEndpoint]
     @Published var portChangeNotificationPreference: PortChangeNotificationPreference
+    @Published var isAIUsageEnabled: Bool
     @Published var notificationPermissionStatus: PortChangeNotificationPermissionStatus = .unknown
     @Published var notificationPermissionError: String?
     @Published private(set) var copyFeedbackMessage: String?
@@ -335,6 +340,7 @@ final class PortMonitorViewModel: ObservableObject {
         self.customPortProfiles = initialProfiles
         self.customServiceEndpoints = initialEndpoints
         self.portChangeNotificationPreference = initialNotificationPreference
+        self.isAIUsageEnabled = settings.isAIUsageEnabled
         self.onRefresh = onRefresh
         self.onSettingsRefresh = onSettingsRefresh
         self.onKill = onKill
@@ -411,6 +417,7 @@ final class PortMonitorViewModel: ObservableObject {
     }
 
     func requestKill(_ target: KillTarget) {
+        guard !isTerminatingProcess else { return }
         killConfirmationTarget = target
         killErrorMessage = nil
     }
@@ -470,7 +477,8 @@ final class PortMonitorViewModel: ObservableObject {
             theme: theme,
             customPortProfiles: customPortProfiles,
             customServiceEndpoints: customServiceEndpoints,
-            portChangeNotificationPreference: portChangeNotificationPreference
+            portChangeNotificationPreference: portChangeNotificationPreference,
+            isAIUsageEnabled: isAIUsageEnabled
         )
     }
 
@@ -524,20 +532,27 @@ final class PortMonitorViewModel: ObservableObject {
                 profiles: draft.customPortProfiles,
                 serviceEndpoints: draft.customServiceEndpoints,
                 portChangeNotificationPreference: draft.portChangeNotificationPreference,
+                isAIUsageEnabled: draft.isAIUsageEnabled,
                 parser: parser
             )
             savedNotificationPreference = try settings.loadPortChangeNotificationPreference()
+        } catch let error as AppSettingsError {
+            if case .builtInServicePort = error {
+                throw SettingsDraftSaveError.customServices(error)
+            }
+            throw SettingsDraftSaveError.storage(error)
         } catch {
             throw SettingsDraftSaveError.storage(error)
         }
 
         let intervalChanged = draft.refreshInterval != refreshInterval
-        portExpression = draft.portExpression
+        portExpression = settings.watchedPortsExpression
         refreshInterval = draft.refreshInterval
         theme = draft.theme
         customPortProfiles = draft.customPortProfiles
         customServiceEndpoints = draft.customServiceEndpoints
         portChangeNotificationPreference = savedNotificationPreference
+        isAIUsageEnabled = settings.isAIUsageEnabled
         settingsErrorMessage = nil
         onWatchedPortsCommitted(Set(oldPorts), Set(newPorts))
         if intervalChanged {

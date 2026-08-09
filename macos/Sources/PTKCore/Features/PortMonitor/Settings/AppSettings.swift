@@ -41,6 +41,7 @@ public enum AppSettingsError: Error, Equatable, CustomStringConvertible {
     case emptyProfileName
     case emptyServiceName
     case invalidServicePort
+    case builtInServicePort(UInt16)
     case corruptStoredValue(String)
 
     public var description: String {
@@ -51,6 +52,8 @@ public enum AppSettingsError: Error, Equatable, CustomStringConvertible {
             return "service name is empty"
         case .invalidServicePort:
             return "service port must be between 1 and 65535"
+        case .builtInServicePort(let port):
+            return "포트 \(port)는 기본 서비스에서 이미 감시 중입니다."
         case .corruptStoredValue(let key):
             return "stored settings could not be read: \(key)"
         }
@@ -149,6 +152,7 @@ public final class AppSettings {
         public static let watchedPortsExpression = "watchedPortsExpression"
         public static let refreshInterval = "refreshIntervalSeconds"
         public static let theme = "theme"
+        public static let aiUsageEnabled = "aiUsageEnabled"
         public static let customPortProfiles = "customPortProfiles"
         public static let customServiceEndpoints = "customServiceEndpoints"
         public static let portChangeNotificationsEnabled = "portChangeNotificationsEnabled"
@@ -205,6 +209,11 @@ public final class AppSettings {
         set { store.set(newValue.rawValue, forKey: Key.theme) }
     }
 
+    public var isAIUsageEnabled: Bool {
+        get { store.bool(forKey: Key.aiUsageEnabled) ?? false }
+        set { store.set(newValue, forKey: Key.aiUsageEnabled) }
+    }
+
     public var customPortProfiles: [PortProfile] {
         (try? loadCustomPortProfiles()) ?? []
     }
@@ -256,9 +265,16 @@ public final class AppSettings {
         serviceEndpoints: [DatabaseEndpoint]
     ) throws {
         _ = try loadCustomPortProfiles()
-        _ = try loadCustomServiceEndpoints()
+        let storedEndpoints = try loadCustomServiceEndpoints()
+        let validatedEndpoints = try serviceEndpoints.map {
+            try validatedServiceEndpoint(
+                name: $0.name,
+                port: Int($0.port),
+                allowBuiltInPort: storedEndpoints.contains($0)
+            )
+        }
         let encodedProfiles = try encodedCollection(profiles, forKey: Key.customPortProfiles)
-        let encodedEndpoints = try encodedCollection(serviceEndpoints, forKey: Key.customServiceEndpoints)
+        let encodedEndpoints = try encodedCollection(validatedEndpoints, forKey: Key.customServiceEndpoints)
         store.set(encodedProfiles, forKey: Key.customPortProfiles)
         store.set(encodedEndpoints, forKey: Key.customServiceEndpoints)
     }
@@ -271,10 +287,11 @@ public final class AppSettings {
         profiles: [PortProfile],
         serviceEndpoints: [DatabaseEndpoint],
         portChangeNotificationPreference: PortChangeNotificationPreference,
+        isAIUsageEnabled: Bool = false,
         parser: PortRangeParser = PortRangeParser()
     ) throws {
         _ = try loadCustomPortProfiles()
-        _ = try loadCustomServiceEndpoints()
+        let storedEndpoints = try loadCustomServiceEndpoints()
         let storedPreference = try loadPortChangeNotificationPreference()
 
         let normalizedWatchedExpression = watchedPortsExpression
@@ -294,8 +311,15 @@ public final class AppSettings {
             normalizedPreference.portsExpression = normalizedExpression
         }
 
+        let validatedEndpoints = try serviceEndpoints.map {
+            try validatedServiceEndpoint(
+                name: $0.name,
+                port: Int($0.port),
+                allowBuiltInPort: storedEndpoints.contains($0)
+            )
+        }
         let encodedProfiles = try encodedCollection(profiles, forKey: Key.customPortProfiles)
-        let encodedEndpoints = try encodedCollection(serviceEndpoints, forKey: Key.customServiceEndpoints)
+        let encodedEndpoints = try encodedCollection(validatedEndpoints, forKey: Key.customServiceEndpoints)
 
         let expressionChanged = normalizedPreference.portsExpression != storedPreference.portsExpression
         let enabledChanged = normalizedPreference.isEnabled != storedPreference.isEnabled
@@ -313,6 +337,9 @@ public final class AppSettings {
         }
         if store.string(forKey: Key.theme) != theme.rawValue {
             store.set(theme.rawValue, forKey: Key.theme)
+        }
+        if store.bool(forKey: Key.aiUsageEnabled) != isAIUsageEnabled {
+            store.set(isAIUsageEnabled, forKey: Key.aiUsageEnabled)
         }
         if store.string(forKey: Key.customPortProfiles) != encodedProfiles {
             store.set(encodedProfiles, forKey: Key.customPortProfiles)
@@ -376,11 +403,25 @@ public final class AppSettings {
     }
 
     public func validatedServiceEndpoint(name: String, port: Int) throws -> DatabaseEndpoint {
+        try validatedServiceEndpoint(name: name, port: port, allowBuiltInPort: false)
+    }
+
+    private func validatedServiceEndpoint(
+        name: String,
+        port: Int,
+        allowBuiltInPort: Bool
+    ) throws -> DatabaseEndpoint {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { throw AppSettingsError.emptyServiceName }
         guard port > 0, port <= Int(UInt16.max) else { throw AppSettingsError.invalidServicePort }
-        return DatabaseEndpoint(name: trimmedName, port: UInt16(port))
+        let validatedPort = UInt16(port)
+        guard allowBuiltInPort || !Self.builtInServicePorts.contains(validatedPort) else {
+            throw AppSettingsError.builtInServicePort(validatedPort)
+        }
+        return DatabaseEndpoint(name: trimmedName, port: validatedPort)
     }
+
+    private static let builtInServicePorts = Set(ServiceMonitor.defaultDatabaseEndpoints.map(\.port))
 
     private func loadCollection<Value: Decodable>(forKey key: String) throws -> [Value] {
         guard store.containsValue(forKey: key) else { return [] }

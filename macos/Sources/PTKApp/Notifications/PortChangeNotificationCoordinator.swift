@@ -208,16 +208,15 @@ public final class PortChangeNotificationCoordinator {
 
     public func refreshPermissionStatus() async {
         let lifecycle = lifecycleEpoch
-        let eligibilityRevision = eligibility.notificationEligibilityRevision
         permissionPublicationEpoch &+= 1
         let publicationEpoch = permissionPublicationEpoch
         let status = await permission.notificationPermissionStatus()
         guard isPermissionPublicationValid(
             lifecycleEpoch: lifecycle,
-            eligibilityRevision: eligibilityRevision,
             publicationEpoch: publicationEpoch
         ) else { return }
         permissionStatus = status
+        lastPermissionRequestError = nil
     }
 
     /// Requests only from a fresh `.notDetermined` reading. Concurrent callers share only the current valid request.
@@ -300,13 +299,11 @@ public final class PortChangeNotificationCoordinator {
 
     private func isPermissionPublicationValid(
         lifecycleEpoch: UInt64,
-        eligibilityRevision: UInt64,
         publicationEpoch: UInt64
     ) -> Bool {
-        isPermissionRequestValid(
-            lifecycleEpoch: lifecycleEpoch,
-            eligibilityRevision: eligibilityRevision
-        ) && publicationEpoch == permissionPublicationEpoch
+        isRunning
+            && lifecycleEpoch == self.lifecycleEpoch
+            && publicationEpoch == permissionPublicationEpoch
     }
 
     private func beginDrainIfNeeded() {

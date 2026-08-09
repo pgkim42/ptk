@@ -5,6 +5,15 @@ struct ContentView: View {
     static let panelSize = NSSize(width: 392, height: 540)
 
     @ObservedObject var viewModel: PortMonitorViewModel
+    let aiUsageSnapshotProvider: AIUsageSnapshotProvider
+
+    init(
+        viewModel: PortMonitorViewModel,
+        aiUsageSnapshotProvider: @escaping AIUsageSnapshotProvider = AIUsageSectionView.liveSnapshotProvider
+    ) {
+        self.viewModel = viewModel
+        self.aiUsageSnapshotProvider = aiUsageSnapshotProvider
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -12,25 +21,30 @@ struct ContentView: View {
 
             Divider().overlay(PTKTheme.border)
 
-            VStack(spacing: 10) {
-                if let errorMessage = viewModel.errorMessage {
-                    ErrorBannerView(message: errorMessage)
+            ScrollView {
+                VStack(spacing: 10) {
+                    if let errorMessage = viewModel.errorMessage {
+                        ErrorBannerView(message: errorMessage)
+                    }
+
+                    if !viewModel.recentPortChanges.isEmpty {
+                        RecentPortChangesView(viewModel: viewModel)
+                    }
+
+                    OpenPortsSectionView(viewModel: viewModel)
+
+                    if !viewModel.serviceStatuses.isEmpty {
+                        ServiceStatusSectionView(viewModel: viewModel)
+                    }
+
+                    if viewModel.isAIUsageEnabled {
+                        AIUsageSectionView(snapshotProvider: aiUsageSnapshotProvider)
+                    }
                 }
-
-                if !viewModel.recentPortChanges.isEmpty {
-                    RecentPortChangesView(viewModel: viewModel)
-                }
-
-                OpenPortsSectionView(viewModel: viewModel)
-
-                if !viewModel.serviceStatuses.isEmpty {
-                    ServiceStatusSectionView(viewModel: viewModel)
-                }
-
-                AIUsageSectionView()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .layoutPriority(1)
 

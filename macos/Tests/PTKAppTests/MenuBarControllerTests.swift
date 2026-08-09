@@ -262,16 +262,64 @@ import Testing
         }
     }
 
+    @Test func killInProgressRejectsASecondConfirmationTarget() async {
+        let gate = BlockingGate()
+        let killCalls = LockedBox(0)
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) },
+            killWorker: { _ in
+                killCalls.withValue { $0 += 1 }
+                gate.waitUpToOneSecond()
+            }
+        )
+        defer {
+            gate.open()
+            controller.stop()
+        }
+
+        controller.viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node"))
+        controller.viewModel.confirmKill()
+        #expect(await eventually { killCalls.value == 1 && controller.viewModel.isTerminatingProcess })
+
+        controller.viewModel.requestKill(KillTarget(port: 5173, pid: 200, processName: "vite"))
+
+        #expect(controller.viewModel.killConfirmationTarget == nil)
+        #expect(killCalls.value == 1)
+        gate.open()
+        #expect(await eventually { !controller.viewModel.isTerminatingProcess })
+    }
+
+    @Test func cancellingConfirmationDoesNotInvokeProductionKillWorker() {
+        let killCalls = LockedBox(0)
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) },
+            killWorker: { _ in killCalls.withValue { $0 += 1 } }
+        )
+        defer { controller.stop() }
+
+        controller.viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node"))
+        controller.viewModel.cancelKill()
+
+        #expect(controller.viewModel.killConfirmationTarget == nil)
+        #expect(!controller.viewModel.isTerminatingProcess)
+        #expect(killCalls.value == 0)
+    }
+
     @Test func settingsDraftChangesAreDiscardedWithoutSave() throws {
         let store = InMemorySettingsStore()
         let settings = AppSettings(store: store)
         try settings.saveCustomPortProfile(title: "Original", expression: "3000")
-        try settings.saveCustomServiceEndpoint(name: "Redis", port: 6379)
+        try settings.saveCustomServiceEndpoint(name: "Search", port: 19200)
         settings.theme = .system
         let viewModel = makeViewModel(settings: settings)
 
         var draft = viewModel.makeSettingsDraft()
         draft.theme = .dark
+        draft.isAIUsageEnabled = true
         draft.customPortProfiles = try viewModel.addingCustomProfile(
             title: "Temporary",
             expression: "5173",
@@ -282,8 +330,54 @@ import Testing
 
         let reloaded = AppSettings(store: store)
         #expect(reloaded.theme == .system)
+        #expect(!reloaded.isAIUsageEnabled)
         #expect(try reloaded.loadCustomPortProfiles().map(\.title) == ["Original"])
-        #expect(try reloaded.loadCustomServiceEndpoints().map(\.name) == ["Redis"])
+        #expect(try reloaded.loadCustomServiceEndpoints().map(\.name) == ["Search"])
+    }
+
+    @Test func customServiceAdditionRejectsBuiltInDatabasePort() {
+        let viewModel = makeViewModel(settings: AppSettings(store: InMemorySettingsStore()))
+
+        #expect(throws: AppSettingsError.builtInServicePort(5432)) {
+            try viewModel.addingCustomServiceEndpoint(
+                name: "Local PostgreSQL",
+                portText: "5432",
+                to: []
+            )
+        }
+    }
+
+    @Test func settingsSaveReportsBuiltInPortAsCustomServiceError() {
+        let viewModel = makeViewModel(settings: AppSettings(store: InMemorySettingsStore()))
+        var draft = viewModel.makeSettingsDraft()
+        draft.customServiceEndpoints = [DatabaseEndpoint(name: "Local PostgreSQL", port: 5432)]
+
+        do {
+            try viewModel.saveSettingsDraft(draft)
+            Issue.record("Built-in service port must be rejected.")
+        } catch let SettingsDraftSaveError.customServices(error) {
+            #expect(error as? AppSettingsError == .builtInServicePort(5432))
+        } catch {
+            Issue.record("Built-in service port used the wrong settings error.")
+        }
+    }
+
+    @Test func settingsSavePublishesNormalizedExpressionAndAIOptIn() throws {
+        let store = InMemorySettingsStore()
+        let settings = AppSettings(store: store)
+        let viewModel = makeViewModel(settings: settings)
+        let preset = AppDefaults.portPresets[0]
+        var draft = viewModel.makeSettingsDraft()
+        draft.portExpression = "  \(preset.expression)  "
+        draft.isAIUsageEnabled = true
+
+        try viewModel.saveSettingsDraft(draft)
+
+        #expect(settings.watchedPortsExpression == preset.expression)
+        #expect(viewModel.portExpression == preset.expression)
+        #expect(viewModel.currentProfileTitle == preset.title)
+        #expect(settings.isAIUsageEnabled)
+        #expect(viewModel.isAIUsageEnabled)
     }
 
     @MainActor

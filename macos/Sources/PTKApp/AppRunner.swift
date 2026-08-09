@@ -12,15 +12,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     override init() {
         let environment = ProcessInfo.processInfo.environment
         let snapshotURL = environment["PTK_QA_SNAPSHOT_PATH"].map(URL.init(fileURLWithPath:))
-        let snapshotKind = environment["PTK_QA_SNAPSHOT_KIND"] ?? "panel"
+        let snapshotKind = Self.effectiveSnapshotKind(
+            requestedKind: environment["PTK_QA_SNAPSHOT_KIND"] ?? "panel",
+            snapshotURL: snapshotURL
+        )
         let settings = snapshotURL == nil
             ? AppSettings()
             : AppSettings(store: InMemorySettingsStore())
-        if let rawTheme = environment["PTK_QA_THEME"], let theme = AppTheme(rawValue: rawTheme) {
+        if snapshotURL != nil,
+           let rawTheme = environment["PTK_QA_THEME"],
+           let theme = AppTheme(rawValue: rawTheme) {
             settings.theme = theme
         }
         if snapshotKind == "panel-docker" {
             settings.watchedPortsExpression = "3000-3009,5173-5182,4200-4209,8080-8089"
+        } else if snapshotKind == "panel-dense" {
+            settings.watchedPortsExpression = "3000-3003"
+            settings.isAIUsageEnabled = true
         }
         self.snapshotURL = snapshotURL
         self.snapshotKind = snapshotKind
@@ -34,9 +42,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.notificationClient = notificationClient
         let scanner: PortScanner
         let serviceSnapshotWorker: ServiceSnapshotWorker?
+        let aiUsageSnapshotProvider = Self.aiUsageSnapshotProvider(snapshotKind: snapshotKind)
         if snapshotKind == "panel-docker" {
             scanner = Self.dockerPanelSnapshotScanner
             serviceSnapshotWorker = { _ in Self.dockerPanelSnapshot() }
+        } else if snapshotKind == "panel-dense" {
+            scanner = Self.densePanelSnapshotScanner
+            serviceSnapshotWorker = { _ in Self.densePanelSnapshot() }
         } else {
             scanner = PortScanner()
             serviceSnapshotWorker = nil
@@ -46,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 settings: settings,
                 scanner: scanner,
                 serviceSnapshotWorker: serviceSnapshotWorker,
+                aiUsageSnapshotProvider: aiUsageSnapshotProvider,
                 notificationPermission: notificationClient,
                 notificationDelivery: notificationClient,
                 notificationResponseHandler: notificationClient
@@ -56,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 settings: settings,
                 scanner: scanner,
                 serviceSnapshotWorker: serviceSnapshotWorker,
+                aiUsageSnapshotProvider: aiUsageSnapshotProvider,
                 notificationPermission: snapshotClient,
                 notificationDelivery: snapshotClient
             )
@@ -68,9 +82,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return !bundleIdentifier.isEmpty
     }
 
+    static func effectiveSnapshotKind(requestedKind: String, snapshotURL: URL?) -> String {
+        snapshotURL == nil ? "panel" : requestedKind
+    }
+
+    static func aiUsageSnapshotProvider(snapshotKind: String) -> AIUsageSnapshotProvider {
+        guard snapshotKind == "panel-dense" else {
+            return AIUsageSectionView.liveSnapshotProvider
+        }
+        return {
+            AIUsageSnapshot(
+                checkedAt: Date(timeIntervalSince1970: 0),
+                providers: [
+                    AIUsageProviderStatus(
+                        provider: .claude,
+                        windows: [AIUsageWindow(label: "5시간", usedPercentage: 28, resetsAt: nil)]
+                    ),
+                    AIUsageProviderStatus(
+                        provider: .codex,
+                        windows: [AIUsageWindow(label: "주간", usedPercentage: 43, resetsAt: nil)]
+                    )
+                ]
+            )
+        }
+    }
+
     private static var dockerPanelSnapshotScanner: PortScanner {
         PortScanner(
             connector: SnapshotSocketConnector(openPorts: [3000, 5173]),
+            lookup: ProcessLookup(runner: SnapshotProcessRunner())
+        )
+    }
+
+    private static var densePanelSnapshotScanner: PortScanner {
+        PortScanner(
+            connector: SnapshotSocketConnector(openPorts: [3000, 3001, 3002, 3003]),
             lookup: ProcessLookup(runner: SnapshotProcessRunner())
         )
     }
@@ -86,15 +132,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DockerContainerPortRow(
                     id: "container-web",
                     name: "web",
-                    detail: "3000 -> 80"
+                    detail: "*:3000 -> 80/tcp"
                 ),
                 DockerContainerPortRow(
                     id: "container-api",
                     name: "api",
-                    detail: "4000 -> 4000, 9229 -> 9229"
+                    detail: "*:4000 -> 4000/tcp, localhost:9229 -> 9229/tcp"
                 )
             ]
         )
+    }
+
+    nonisolated private static func densePanelSnapshot() -> ServiceSnapshot {
+        ServiceSnapshot(statuses: [
+            ServiceStatus(name: "Docker", detail: "Daemon", state: .running),
+            ServiceStatus(name: "PostgreSQL", detail: "Port 5432", state: .running),
+            ServiceStatus(name: "MySQL", detail: "Port 3306", state: .stopped),
+            ServiceStatus(name: "Redis", detail: "Port 6379", state: .running),
+            ServiceStatus(name: "MongoDB", detail: "Port 27017", state: .stopped)
+        ])
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -102,6 +158,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let snapshotURL else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [menuBarController, snapshotKind] in
             do {
+                if snapshotKind == "panel-dense" {
+                    let now = Date()
+                    menuBarController.viewModel.recentPortChanges = (0..<4).map { offset in
+                        PortChange(
+                            port: UInt16(4000 + offset),
+                            kind: .opened,
+                            pid: 100 + offset,
+                            processName: "node",
+                            occurredAt: now
+                        )
+                    }
+                }
                 if snapshotKind == "button-states" {
                     try menuBarController.writeButtonInteractionSnapshot(to: snapshotURL)
                 } else if snapshotKind == "settings" {
@@ -148,10 +216,14 @@ private struct SnapshotProcessRunner: ProcessRunning {
             return ProcessRunResult(exitCode: 0, stdout: """
             COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
             node     3100 pgkim  20u  IPv4 0xabcd      0t0  TCP *:3000 (LISTEN)
+            node     3101 pgkim  21u  IPv4 0xbcde      0t0  TCP *:3001 (LISTEN)
+            node     3102 pgkim  22u  IPv4 0xcdef      0t0  TCP *:3002 (LISTEN)
+            node     3103 pgkim  23u  IPv4 0xdef0      0t0  TCP *:3003 (LISTEN)
             vite     5173 pgkim  15u  IPv4 0xcdef      0t0  TCP 127.0.0.1:5173 (LISTEN)
             """)
         }
-        if executable == "ps", arguments == ["-p", "3100", "-o", "comm="] {
+        if executable == "ps", arguments.count > 1,
+           ["3100", "3101", "3102", "3103"].contains(arguments[1]) {
             return ProcessRunResult(exitCode: 0, stdout: "/usr/local/bin/node\n")
         }
         if executable == "ps", arguments == ["-p", "5173", "-o", "comm="] {

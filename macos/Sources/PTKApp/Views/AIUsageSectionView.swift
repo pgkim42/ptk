@@ -1,13 +1,24 @@
 import SwiftUI
 import PTKCore
 
+typealias AIUsageSnapshotProvider = @Sendable () async -> AIUsageSnapshot
+
 struct AIUsageSectionView: View {
     private static let monitor = AIUsageMonitor()
+    static let liveSnapshotProvider: AIUsageSnapshotProvider = {
+        await monitor.snapshot()
+    }
+
+    let snapshotProvider: AIUsageSnapshotProvider
     @State private var providers: [AIUsageProviderStatus] = [
         .init(provider: .claude, windows: [], errorMessage: "확인 중"),
         .init(provider: .codex, windows: [], errorMessage: "확인 중")
     ]
     @State private var isLoading = true
+
+    init(snapshotProvider: @escaping AIUsageSnapshotProvider = Self.liveSnapshotProvider) {
+        self.snapshotProvider = snapshotProvider
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -145,7 +156,7 @@ struct AIUsageSectionView: View {
     @MainActor
     private func reload() async {
         isLoading = true
-        providers = await Self.monitor.snapshot().providers
+        providers = await snapshotProvider().providers
         isLoading = false
     }
 }
