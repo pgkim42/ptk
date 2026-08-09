@@ -101,6 +101,32 @@ import Foundation
         ])
     }
 
+    @Test func lsofExitOneWithoutOutputIsAnEmptySnapshot() throws {
+        let runner = TimeoutRecordingProcessRunner()
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 1,
+            stdout: "",
+            stderr: ""
+        )
+
+        let snapshot = try ProcessLookup(runner: runner).listeningSnapshot()
+
+        #expect(snapshot == LsofSnapshot(records: []))
+    }
+
+    @Test func lsofExitOneWithDiagnosticsRemainsAFailure() {
+        let runner = TimeoutRecordingProcessRunner()
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 1,
+            stdout: "",
+            stderr: "permission denied"
+        )
+
+        #expect(throws: ProcessLookupError.lsofFailed("permission denied")) {
+            try ProcessLookup(runner: runner).listeningSnapshot()
+        }
+    }
+
     @Test func psUsesPinnedOneSecondTimeout() throws {
         let runner = TimeoutRecordingProcessRunner()
         runner.results["ps -p 111 -o comm="] = ProcessRunResult(exitCode: 0, stdout: "node")

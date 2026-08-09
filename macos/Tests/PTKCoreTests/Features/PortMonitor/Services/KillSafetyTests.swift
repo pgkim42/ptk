@@ -229,6 +229,25 @@ private struct FakeConfirmer: KillConfirming {
         #expect(terminator.terminatedPIDs.isEmpty)
     }
 
+    @Test func lastVanishedListenerWithEmptyLsofResultUsesNoLongerListeningError() {
+        let runner = FakeProcessRunner()
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 1,
+            stdout: "",
+            stderr: ""
+        )
+        let terminator = FakeTerminator()
+        let service = KillService(
+            resolver: ProcessLookup(runner: runner),
+            terminator: terminator
+        )
+
+        #expect(throws: KillError.portNoLongerListening) {
+            try service.terminateAfterRevalidation(target: target(pid: 111, name: "node"))
+        }
+        #expect(terminator.terminatedPIDs.isEmpty)
+    }
+
     @Test func terminationFailureIsSurfacedAfterOneCall() {
         let terminator = FakeTerminator()
         terminator.failureMessage = "operation not permitted"

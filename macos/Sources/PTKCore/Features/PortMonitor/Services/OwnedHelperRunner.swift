@@ -136,17 +136,17 @@ public struct OwnedHelperRunner: Sendable {
 
         stdoutWrite.close()
         stderrWrite.close()
-        let deadline = Date(timeIntervalSinceNow: bounded(configuration.timeout))
+        DispatchQueue.global(qos: .userInitiated).async(execute: waiter)
 
-        DispatchQueue.global(qos: .utility).async(execute: waiter)
-
-        let naturalExit = exit.waitForExitOrClaimDeadline(at: deadline)
+        let naturalExit = exit.waitForExitOrClaimDeadline(
+            after: bounded(configuration.timeout)
+        )
         if !naturalExit {
             exit.signalIfUnreaped(process: process, signal: SIGTERM)
             if !exit.waitForReap(after: bounded(configuration.terminationGrace)) {
                 exit.signalIfUnreaped(process: process, signal: SIGKILL)
+                _ = exit.waitForReap(after: bounded(configuration.terminationGrace))
             }
-            exit.waitForReap()
             finishDraining(
                 group: drainGroup,
                 stdoutRead: stdoutRead,
@@ -188,14 +188,20 @@ public struct OwnedHelperRunner: Sendable {
     }
 
     private func installReader(handle: OwnedFileHandle, capture: StreamCapture) {
+        let readerQueue = DispatchQueue(
+            label: "ptk.owned-helper.stream-reader",
+            qos: .userInitiated
+        )
         capture.start()
         handle.fileHandle.readabilityHandler = { readableHandle in
             let data = readableHandle.availableData
-            if data.isEmpty {
-                handle.stopReading()
-                capture.finish()
-            } else {
-                capture.append(data)
+            readerQueue.async {
+                if data.isEmpty {
+                    handle.stopReading()
+                    capture.finish()
+                } else {
+                    capture.append(data)
+                }
             }
         }
     }
@@ -312,50 +318,55 @@ private final class StreamCapture: @unchecked Sendable {
 }
 
 private final class ExitCoordinator: @unchecked Sendable {
-    private let condition = NSCondition()
+    private let lock = NSLock()
+    private let reapedSignal = DispatchSemaphore(value: 0)
     private var reaped = false
     private var deadlineWon = false
 
     func recordReaped() {
-        condition.lock()
+        lock.lock()
+        guard !reaped else {
+            lock.unlock()
+            return
+        }
+        reapedSignal.signal()
         reaped = true
-        condition.broadcast()
-        condition.unlock()
+        lock.unlock()
     }
 
-    func waitForExitOrClaimDeadline(at deadline: Date) -> Bool {
-        condition.lock()
-        while !reaped, condition.wait(until: deadline) {}
-        if !reaped {
+    func waitForExitOrClaimDeadline(after interval: TimeInterval) -> Bool {
+        let signaled = reapedSignal.wait(timeout: .now() + interval) == .success
+        lock.lock()
+        if !signaled {
             deadlineWon = true
         }
         let exitedNaturally = reaped && !deadlineWon
-        condition.unlock()
+        lock.unlock()
         return exitedNaturally
     }
 
     func waitForReap(after interval: TimeInterval) -> Bool {
-        let deadline = Date(timeIntervalSinceNow: interval)
-        condition.lock()
-        while !reaped, condition.wait(until: deadline) {}
+        lock.lock()
+        if reaped {
+            lock.unlock()
+            return true
+        }
+        lock.unlock()
+
+        _ = reapedSignal.wait(timeout: .now() + interval)
+        lock.lock()
         let result = reaped
-        condition.unlock()
+        lock.unlock()
         return result
     }
 
-    func waitForReap() {
-        condition.lock()
-        while !reaped {
-            condition.wait()
-        }
-        condition.unlock()
-    }
-
     func signalIfUnreaped(process: any OwnedHelperProcess, signal: Int32) {
-        condition.lock()
-        if !reaped {
-            process.sendSignal(signal)
+        lock.lock()
+        guard !reaped else {
+            lock.unlock()
+            return
         }
-        condition.unlock()
+        process.sendSignal(signal)
+        lock.unlock()
     }
 }

@@ -112,6 +112,32 @@ import Testing
         #expect(process.waitUntilExitCallCount == 1)
     }
 
+    @Test func failedSignalsAndUnreapedChildStillRespectHardDeadline() {
+        let process = FakeOwnedHelperProcess(
+            exitBehavior: .never,
+            signalSucceeds: false
+        )
+        defer { process.releaseWaiter() }
+        let runner = OwnedHelperRunner(processFactory: { process })
+        let startedAt = ProcessInfo.processInfo.systemUptime
+
+        #expect(throws: OwnedHelperError.timedOut) {
+            try runner.run(
+                "/fake/helper",
+                arguments: [],
+                configuration: OwnedHelperConfiguration(
+                    timeout: 0.01,
+                    terminationGrace: 0.01,
+                    postExitDrainGrace: 0.01
+                )
+            )
+        }
+
+        let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
+        #expect(elapsed < 0.5)
+        #expect(process.signals == [SIGTERM, SIGKILL])
+    }
+
     @Test func exactlyOneWaiterOwnsNaturalReap() throws {
         let process = FakeOwnedHelperProcess(exitBehavior: .immediate)
         let result = try OwnedHelperRunner(processFactory: { process }).run(
@@ -176,6 +202,7 @@ private final class FakeOwnedHelperProcess: OwnedHelperProcess, @unchecked Senda
         case immediate
         case onTerm
         case onKill
+        case never
     }
 
     var executableURL: URL?
@@ -200,6 +227,7 @@ private final class FakeOwnedHelperProcess: OwnedHelperProcess, @unchecked Senda
     private let exitBehavior: ExitBehavior
     private let launchError: Error?
     private let holdsOutputDescriptor: Bool
+    private let signalSucceeds: Bool
     private let outputByteCount: Int
     private let errorOutputByteCount: Int
     private let lock = NSLock()
@@ -218,7 +246,8 @@ private final class FakeOwnedHelperProcess: OwnedHelperProcess, @unchecked Senda
         outputByteCount: Int = 0,
         errorOutputByteCount: Int = 0,
         exitCode: Int32 = 0,
-        launchError: Error? = nil
+        launchError: Error? = nil,
+        signalSucceeds: Bool = true
     ) {
         self.exitBehavior = exitBehavior
         self.holdsOutputDescriptor = holdsOutputDescriptor
@@ -226,6 +255,7 @@ private final class FakeOwnedHelperProcess: OwnedHelperProcess, @unchecked Senda
         self.errorOutputByteCount = errorOutputByteCount
         storedTerminationStatus = exitCode
         self.launchError = launchError
+        self.signalSucceeds = signalSucceeds
     }
 
     func run() throws {
@@ -262,9 +292,14 @@ private final class FakeOwnedHelperProcess: OwnedHelperProcess, @unchecked Senda
 
     func sendSignal(_ signal: Int32) {
         lock.withLock { receivedSignals.append(signal) }
+        guard signalSucceeds else { return }
         if (signal == SIGTERM && exitBehavior == .onTerm) || signal == SIGKILL {
             exitSemaphore.signal()
         }
+    }
+
+    func releaseWaiter() {
+        exitSemaphore.signal()
     }
 
     func closeHeldDescriptor() {

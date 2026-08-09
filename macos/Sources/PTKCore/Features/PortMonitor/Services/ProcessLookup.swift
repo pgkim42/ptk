@@ -68,7 +68,12 @@ public struct ProcessLookup: Sendable {
             throw ProcessLookupError.lsofFailed(String(describing: error))
         }
         guard result.succeeded else {
-            throw ProcessLookupError.lsofFailed(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+            let stdout = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            if result.exitCode == 1, stdout.isEmpty, stderr.isEmpty {
+                return LsofSnapshot(records: [])
+            }
+            throw ProcessLookupError.lsofFailed(stderr)
         }
         return parser.parse(result.stdout)
     }

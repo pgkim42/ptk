@@ -1,8 +1,39 @@
+import Darwin
 import Foundation
 import Testing
 @testable import PTKCore
 
 @Suite struct PortScannerTests {
+    @Test func systemConnectorConnectsToLocalListenerWithinBudget() throws {
+        let listener = try BoundIPv4Socket(isListening: true)
+        let startedAt = ProcessInfo.processInfo.systemUptime
+
+        let isListening = TCPPortConnector().isListening(
+            host: "127.0.0.1",
+            port: listener.port,
+            timeout: 0.2
+        )
+
+        let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
+        #expect(isListening)
+        #expect(elapsed < 0.5)
+    }
+
+    @Test func systemConnectorRejectsBoundNonListenerWithinBudget() throws {
+        let reservation = try BoundIPv4Socket(isListening: false)
+        let startedAt = ProcessInfo.processInfo.systemUptime
+
+        let isListening = TCPPortConnector().isListening(
+            host: "127.0.0.1",
+            port: reservation.port,
+            timeout: 0.05
+        )
+
+        let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
+        #expect(!isListening)
+        #expect(elapsed < 0.25)
+    }
+
     @Test func ipv4OnlyListenerIsOpen() {
         let connector = RecordingSocketConnector(openHostsByPort: [3000: ["127.0.0.1"]])
 
@@ -156,6 +187,71 @@ import Testing
         #expect(status.killTarget == nil)
     }
 
+}
+
+private final class BoundIPv4Socket {
+    let port: UInt16
+    private let descriptor: Int32
+
+    init(isListening: Bool) throws {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw LocalSocketFixtureError.socket(errno) }
+
+        do {
+            var loopback = in_addr()
+            guard "127.0.0.1".withCString({ inet_pton(AF_INET, $0, &loopback) }) == 1 else {
+                throw LocalSocketFixtureError.address
+            }
+            var address = sockaddr_in()
+            address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            address.sin_family = sa_family_t(AF_INET)
+            address.sin_port = 0
+            address.sin_addr = loopback
+
+            let bindResult = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                    Darwin.bind(
+                        descriptor,
+                        sockaddrPointer,
+                        socklen_t(MemoryLayout<sockaddr_in>.size)
+                    )
+                }
+            }
+            guard bindResult == 0 else { throw LocalSocketFixtureError.bind(errno) }
+            if isListening {
+                guard Darwin.listen(descriptor, 1) == 0 else {
+                    throw LocalSocketFixtureError.listen(errno)
+                }
+            }
+
+            var boundAddress = sockaddr_in()
+            var boundAddressSize = socklen_t(MemoryLayout<sockaddr_in>.size)
+            let nameResult = withUnsafeMutablePointer(to: &boundAddress) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                    Darwin.getsockname(descriptor, sockaddrPointer, &boundAddressSize)
+                }
+            }
+            guard nameResult == 0 else { throw LocalSocketFixtureError.name(errno) }
+
+            self.descriptor = descriptor
+            port = UInt16(bigEndian: boundAddress.sin_port)
+        } catch {
+            Darwin.close(descriptor)
+            throw error
+        }
+    }
+
+    deinit {
+        Darwin.close(descriptor)
+    }
+}
+
+private enum LocalSocketFixtureError: Error {
+    case socket(Int32)
+    case address
+    case bind(Int32)
+    case listen(Int32)
+    case name(Int32)
 }
 
 private final class ProcessNameFailingRunner: ProcessRunning, @unchecked Sendable {

@@ -79,35 +79,58 @@ public struct TCPPortConnector: SocketConnecting {
         addressSize: Int,
         timeout: TimeInterval
     ) -> Bool {
+        guard timeout.isFinite, timeout > 0 else { return false }
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
         let fd = socket(family, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
         defer { close(fd) }
 
-        let boundedTimeout = max(timeout, 0)
-        var timeoutValue = timeval(
-            tv_sec: Int(boundedTimeout),
-            tv_usec: Int32(
-                boundedTimeout.truncatingRemainder(dividingBy: 1) * 1_000_000
-            )
-        )
-        setsockopt(
-            fd,
-            SOL_SOCKET,
-            SO_RCVTIMEO,
-            &timeoutValue,
-            socklen_t(MemoryLayout<timeval>.size)
-        )
-        setsockopt(
-            fd,
-            SOL_SOCKET,
-            SO_SNDTIMEO,
-            &timeoutValue,
-            socklen_t(MemoryLayout<timeval>.size)
-        )
+        let flags = fcntl(fd, F_GETFL)
+        guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else {
+            return false
+        }
 
-        return withUnsafePointer(to: &address) { pointer in
+        let result = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                Darwin.connect(fd, sockaddrPointer, socklen_t(addressSize)) == 0
+                Darwin.connect(fd, sockaddrPointer, socklen_t(addressSize))
+            }
+        }
+        let connectError = errno
+        if result == 0 || connectError == EISCONN { return true }
+        let isPending = connectError == EINPROGRESS
+            || connectError == EALREADY
+            || connectError == EINTR
+        guard isPending else { return false }
+
+        return waitForConnection(fd: fd, deadline: deadline)
+    }
+
+    private func waitForConnection(fd: Int32, deadline: TimeInterval) -> Bool {
+        var descriptor = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+
+        while true {
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { return false }
+            let milliseconds = Int32(
+                min(ceil(remaining * 1_000), Double(Int32.max))
+            )
+            let result = Darwin.poll(&descriptor, 1, max(milliseconds, 1))
+            if result > 0 {
+                var socketError: Int32 = 0
+                var length = socklen_t(MemoryLayout<Int32>.size)
+                guard Darwin.getsockopt(
+                    fd,
+                    SOL_SOCKET,
+                    SO_ERROR,
+                    &socketError,
+                    &length
+                ) == 0 else {
+                    return false
+                }
+                return socketError == 0
+            }
+            if result == 0 || errno != EINTR {
+                return false
             }
         }
     }
