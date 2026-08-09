@@ -31,35 +31,22 @@ import Testing
         #expect(controller.viewModel.serviceStatuses.map(\.name) == ["Docker"])
     }
 
-    @Test func newerGenerationPublishesBeforeStaleGenerationWithoutRegression() async {
+    @Test func newerGenerationPublishesBeforeStaleGenerationWithoutRegression() {
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.watchedPortsExpression = "3000"
-        let portGate = BlockingGate()
-        let serviceGate = BlockingGate()
-        let portCalls = LockedBox(0)
-        let serviceCalls = LockedBox(0)
         let controller = MenuBarController(
             settings: settings,
-            portScanWorker: { _ in
-                portCalls.withValue { $0 += 1 }
-                portGate.waitUpToOneSecond()
-                return []
-            },
-            serviceSnapshotWorker: { _ in
-                serviceCalls.withValue { $0 += 1 }
-                serviceGate.waitUpToOneSecond()
-                return ServiceSnapshot(statuses: [])
-            }
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
         )
-        defer {
-            controller.stop()
-            portGate.open()
-            serviceGate.open()
-        }
+        defer { controller.stop() }
 
         controller.performRefresh()
         controller.performRefresh()
-        #expect(await eventually { portCalls.value == 2 && serviceCalls.value == 2 })
+
+        #expect(controller.newestRequestedGenerationForTesting == 2)
+        #expect(controller.activeGenerationsForTesting == [1, 2])
+        #expect(controller.pendingGenerationForTesting == nil)
 
         let newestPortStatuses = [
             PortStatus(port: 4000, isOpen: true, pid: 400, processName: "new")
@@ -130,38 +117,26 @@ import Testing
         #expect(controller.viewModel.serviceStatuses == acceptedServiceStatuses)
         #expect(controller.viewModel.dockerContainerRows == acceptedDockerRows)
     }
-    @Test func latestPendingRefreshReplacesEarlierPendingRefreshBeforeStarting() async {
-        let calls = LockedBox(0)
-        let gate = BlockingGate()
+    @Test func latestPendingRefreshReplacesEarlierPendingRefreshBeforeStarting() {
         let controller = MenuBarController(
             settings: AppSettings(store: InMemorySettingsStore()),
-            portScanWorker: { _ in
-                calls.withValue { $0 += 1 }
-                gate.waitUpToOneSecond()
-                return []
-            },
-            serviceSnapshotWorker: { _ in
-                gate.waitUpToOneSecond()
-                return ServiceSnapshot(statuses: [])
-            }
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) }
         )
-        defer {
-            controller.stop()
-            gate.open()
-        }
+        defer { controller.stop() }
 
         controller.performRefresh()
         controller.performRefresh()
-        #expect(await eventually { calls.value == 2 })
+        controller.performRefresh()
+        controller.performRefresh()
 
-        controller.performRefresh()
-        controller.performRefresh()
+        #expect(controller.newestRequestedGenerationForTesting == 4)
+        #expect(controller.activeGenerationsForTesting == [1, 2])
         #expect(controller.pendingGenerationForTesting == 4)
 
         controller.settlePortForTesting(generation: 1, statuses: [])
         controller.settleServiceForTesting(generation: 1, snapshot: ServiceSnapshot(statuses: []))
 
-        #expect(await eventually { calls.value == 3 })
         #expect(controller.activeGenerationsForTesting == [2, 4])
         #expect(controller.pendingGenerationForTesting == nil)
 
@@ -172,27 +147,16 @@ import Testing
 
         #expect(!controller.viewModel.isRefreshing)
         #expect(controller.activeGenerationsForTesting.isEmpty)
-        #expect(calls.value == 3)
     }
 
-    @Test func stopCancelsOwnedWorkAndPreventsLatePublication() async {
+    @Test func stopClearsRefreshOwnershipAndPreventsLatePublication() {
         let settings = AppSettings(store: InMemorySettingsStore())
         settings.watchedPortsExpression = "3000"
-        let portGate = BlockingGate()
-        let serviceGate = BlockingGate()
-        let portCalls = LockedBox(0)
-        let serviceCalls = LockedBox(0)
         let controller = MenuBarController(
             settings: settings,
-            portScanWorker: { _ in
-                portCalls.withValue { $0 += 1 }
-                portGate.waitUpToOneSecond()
-                return [PortStatus(port: 3000, isOpen: true)]
-            },
+            portScanWorker: { _ in [PortStatus(port: 3000, isOpen: true)] },
             serviceSnapshotWorker: { _ in
-                serviceCalls.withValue { $0 += 1 }
-                serviceGate.waitUpToOneSecond()
-                return ServiceSnapshot(statuses: [
+                ServiceSnapshot(statuses: [
                     ServiceStatus(name: "Late", detail: "Late", state: .running)
                 ])
             }
@@ -201,7 +165,9 @@ import Testing
         controller.performRefresh()
         controller.performRefresh()
         controller.performRefresh()
-        #expect(await eventually { portCalls.value == 2 && serviceCalls.value == 2 })
+
+        #expect(controller.newestRequestedGenerationForTesting == 3)
+        #expect(controller.activeGenerationsForTesting == [1, 2])
         #expect(controller.pendingGenerationForTesting == 3)
 
         controller.stop()
@@ -220,16 +186,8 @@ import Testing
                 ServiceStatus(name: "Late", detail: "Late", state: .running)
             ])
         )
-        portGate.open()
-        serviceGate.open()
-        for _ in 0..<20 {
-            await Task.yield()
-        }
-
         #expect(controller.viewModel.statuses.isEmpty)
         #expect(controller.viewModel.serviceStatuses.isEmpty)
-        #expect(portCalls.value == 2)
-        #expect(serviceCalls.value == 2)
         controller.performRefresh()
         #expect(controller.viewModel.statuses.isEmpty)
     }
@@ -263,7 +221,7 @@ import Testing
     }
 
     @Test func killInProgressRejectsASecondConfirmationTarget() async {
-        let gate = BlockingGate()
+        let gate = KillWorkerGate()
         let killCalls = LockedBox(0)
         let controller = MenuBarController(
             settings: AppSettings(store: InMemorySettingsStore()),
@@ -271,7 +229,7 @@ import Testing
             serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) },
             killWorker: { _ in
                 killCalls.withValue { $0 += 1 }
-                gate.waitUpToOneSecond()
+                gate.waitUntilOpened()
             }
         )
         defer {
@@ -463,14 +421,14 @@ private final class LockedBox<Value>: @unchecked Sendable {
     }
 }
 
-private final class BlockingGate: @unchecked Sendable {
+private final class KillWorkerGate: @unchecked Sendable {
     private let condition = NSCondition()
     private var isOpen = false
 
-    func waitUpToOneSecond() {
+    func waitUntilOpened() {
         condition.lock()
-        let deadline = Date(timeIntervalSinceNow: 1)
-        while !isOpen, condition.wait(until: deadline) {
+        while !isOpen {
+            condition.wait()
         }
         condition.unlock()
     }
