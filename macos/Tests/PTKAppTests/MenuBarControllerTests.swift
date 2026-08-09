@@ -429,15 +429,16 @@ import Testing
 }
 
 @MainActor private func eventually(
-    attempts: Int = 1_000,
+    timeout: TimeInterval = 2,
     _ predicate: @MainActor () -> Bool
 ) async -> Bool {
-    for _ in 0..<attempts {
+    let deadline = ProcessInfo.processInfo.systemUptime + timeout
+    repeat {
         if predicate() {
             return true
         }
-        await Task.yield()
-    }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    } while ProcessInfo.processInfo.systemUptime < deadline
     return predicate()
 }
 
