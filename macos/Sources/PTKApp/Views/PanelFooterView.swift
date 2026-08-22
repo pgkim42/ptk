@@ -4,24 +4,22 @@ struct PanelFooterView: View {
     @ObservedObject var viewModel: PortMonitorViewModel
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: PTKSpace.sm) {
             profileQuickSwitch
 
-            Group {
-                if let message = viewModel.copyFeedbackMessage {
-                    Label(message, systemImage: "checkmark")
-                        .accessibilityLabel(message)
-                } else {
-                    Text(viewModel.refreshInterval.label)
-                }
+            if let message = viewModel.copyFeedbackMessage {
+                Text(message)
+                    .font(PTKType.ui(11, weight: .medium))
+                    .foregroundStyle(PTKTheme.muted)
+                    .accessibilityLabel(message)
+            } else {
+                Text(viewModel.refreshInterval.label)
+                    .font(PTKType.mono(11))
+                    .foregroundStyle(PTKTheme.faint)
+                    .monospacedDigit()
             }
-            .font(.system(size: 9, weight: .bold, design: .monospaced))
-            .foregroundStyle(PTKTheme.muted)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(PTKTheme.card))
 
-            Spacer()
+            Spacer(minLength: 0)
 
             PanelIconButton(
                 systemName: "doc.on.doc",
@@ -47,8 +45,8 @@ struct PanelFooterView: View {
                 NSApplication.shared.terminate(nil)
             }
         }
-        .padding(.horizontal, 12)
-        .frame(height: 36)
+        .padding(.horizontal, PTKSpace.md)
+        .frame(height: 34)
         .layoutPriority(2)
     }
 
@@ -64,23 +62,16 @@ struct PanelFooterView: View {
                 } label: {
                     Text(option.title)
                 }
-                    .accessibilityLabel("프로필 \(option.title) 적용")
-                    .accessibilityHint("감시 포트를 \(option.expression)(으)로 변경합니다.")
+                .accessibilityLabel("프로필 \(option.title) 적용")
+                .accessibilityHint("감시 포트를 \(option.expression)(으)로 변경합니다.")
             }
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 9, weight: .bold))
-                Text(viewModel.currentProfileTitle)
-                    .font(.system(size: 9, weight: .bold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .foregroundStyle(PTKTheme.muted)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .frame(maxWidth: 110)
-            .background(Capsule().fill(PTKTheme.card))
+            Text(viewModel.currentProfileTitle)
+                .font(PTKType.ui(11, weight: .medium))
+                .foregroundStyle(PTKTheme.muted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: 128, alignment: .leading)
         }
         .menuStyle(.borderlessButton)
         .fixedSize(horizontal: true, vertical: false)

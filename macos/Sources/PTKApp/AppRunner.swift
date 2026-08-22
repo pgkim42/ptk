@@ -130,6 +130,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         menuBarController.start(showPanelOnLaunch: showPanelOnLaunch)
         guard let snapshotURL else { return }
+        if snapshotKind == "settings" {
+            menuBarController.viewModel.isShowingSettings = true
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [menuBarController, snapshotKind] in
             do {
                 if snapshotKind == "panel-dense" {

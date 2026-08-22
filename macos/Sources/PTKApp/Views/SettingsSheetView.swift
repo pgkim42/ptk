@@ -76,188 +76,36 @@ struct SettingsSheetView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                let notificationControls = SettingsAccessibility.portChangeNotificationControls(
-                    isEnabled: notificationPreference.isEnabled,
-                    permissionStatus: viewModel.notificationPermissionStatus
-                )
-                let accessibility = SettingsSheetNotificationAccessibility()
-                let actions = SettingsSheetActions(viewModel: viewModel, onDismiss: onDismiss)
+        let notificationControls = SettingsAccessibility.portChangeNotificationControls(
+            isEnabled: notificationPreference.isEnabled,
+            permissionStatus: viewModel.notificationPermissionStatus
+        )
+        let accessibility = SettingsSheetNotificationAccessibility()
+        let actions = SettingsSheetActions(viewModel: viewModel, onDismiss: onDismiss)
 
-                Text("설정")
-                .font(.headline)
+        VStack(spacing: 0) {
+            header(actions: actions)
+            PTKHairline()
+            ScrollView {
+                VStack(alignment: .leading, spacing: PTKSpace.lg) {
+                    if let settingsError {
+                        Text(settingsError)
+                            .font(PTKType.ui(11))
+                            .foregroundStyle(PTKTheme.danger)
+                            .accessibilityLabel("설정 저장 오류: \(settingsError)")
+                    }
 
-                if let settingsError {
-                    Text(settingsError)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .accessibilityLabel("설정 저장 오류: \(settingsError)")
+                    watchSection(accessibility: accessibility, notificationControls: notificationControls)
+                    presetsSection
+                    displaySection
+                    customProfilesSection
+                    customServicesSection
                 }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("감시 포트").font(.caption).foregroundStyle(.secondary)
-                TextField("예: 3000-3009,5173", text: $expression)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .onChange(of: expression) { _ in
-                        expressionError = nil
-                    }
-                if let error = expressionError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .accessibilityLabel("감시 포트 입력 오류: \(error)")
-                }
-            }
-            VStack(alignment: .leading, spacing: 4) {
-
-                Toggle("포트 변경 알림", isOn: Binding(
-                    get: { notificationPreference.isEnabled },
-                    set: { enabled in
-                        notificationPreference = SettingsDraft.notificationPreference(
-                            notificationPreference,
-                            settingEnabled: enabled,
-                            watchedExpression: expression
-                        )
-                    }
-                ))
-                .accessibilityLabel(accessibility.toggleLabel)
-                .accessibilityHint(accessibility.toggleHint)
-                .accessibilityIdentifier(accessibility.toggleIdentifier)
-
-                Text("선택한 포트가 열리거나 닫힐 때 알려줍니다.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-
-                if notificationControls.showsPortExpression {
-                    TextField("알림 포트", text: Binding(
-                        get: { notificationPreference.portsExpression ?? "" },
-                        set: { notificationPreference.portsExpression = $0 }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .accessibilityLabel(accessibility.expressionLabel)
-                    .accessibilityHint(accessibility.expressionHint)
-                    .accessibilityIdentifier(accessibility.expressionIdentifier)
-
-                    if notificationControls.showsDeniedStatus {
-                        HStack {
-                            Text("macOS에서 차단됨")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .accessibilityLabel(accessibility.deniedStatusLabel)
-                                .accessibilityIdentifier(accessibility.deniedStatusIdentifier)
-                            if notificationControls.showsSystemSettingsButton {
-                                Button("시스템 설정 열기") {
-                                    viewModel.openNotificationSettings()
-                                }
-                                .accessibilityLabel(accessibility.systemSettingsButtonLabel)
-                                .accessibilityHint(accessibility.systemSettingsButtonHint)
-                                .accessibilityIdentifier(accessibility.systemSettingsButtonIdentifier)
-                            }
-                        }
-                    }
-                    if let error = viewModel.notificationPermissionError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .accessibilityLabel(accessibility.permissionErrorLabel(error))
-                            .accessibilityIdentifier(accessibility.permissionErrorIdentifier)
-                    }
-                    if let notificationExpressionError {
-                        Text(notificationExpressionError)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .accessibilityLabel(accessibility.validationErrorLabel(notificationExpressionError))
-                            .accessibilityIdentifier(accessibility.validationErrorIdentifier)
-                    }
-                }
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("포트 프리셋").font(.caption).foregroundStyle(.secondary)
-                LazyVGrid(
-                    columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)],
-                    spacing: 6
-                ) {
-                    ForEach(viewModel.portPresets) { preset in
-                        presetButton(preset)
-                    }
-                }
-            }
-
-            customProfilesSection
-            customServicesSection
-            VStack(alignment: .leading, spacing: 4) {
-                Text("새로고침 주기").font(.caption).foregroundStyle(.secondary)
-                Picker(SettingsAccessibility.refreshIntervalPickerLabel, selection: $selectedInterval) {
-                    ForEach(RefreshInterval.allCases, id: \.self) { interval in
-                        Text(interval.label).tag(interval)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .accessibilityHint(SettingsAccessibility.refreshIntervalPickerHint)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("테마").font(.caption).foregroundStyle(.secondary)
-                Picker(SettingsAccessibility.themePickerLabel, selection: $selectedTheme) {
-                    ForEach(AppTheme.allCases, id: \.self) { theme in
-                        Text(theme.label).tag(theme)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .accessibilityHint(SettingsAccessibility.themePickerHint)
-            }
-
-            HStack {
-                Button("취소") {
-                    actions.cancel()
-                }
-                .keyboardShortcut(.cancelAction)
-
-                Button("저장") {
-                    expressionError = nil
-                    notificationExpressionError = nil
-                    settingsError = nil
-                    do {
-                        try actions.save(
-                            SettingsDraft(
-                                portExpression: expression,
-                                refreshInterval: selectedInterval,
-                                theme: selectedTheme,
-                                customPortProfiles: customPortProfiles,
-                                customServiceEndpoints: customServiceEndpoints,
-                                portChangeNotificationPreference: notificationPreference
-                            )
-                        )
-                    } catch let error as SettingsDraftSaveError {
-                        switch error {
-                        case .watchedPorts(let error):
-                            expressionError = "\(error)"
-                        case .notificationPorts(let error):
-                            notificationExpressionError = "\(error)"
-                        case .customServices(let error):
-                            serviceError = "\(error)"
-                        case .storage(let error):
-                            settingsError = "\(error)"
-                        }
-                    } catch {
-                        settingsError = "\(error)"
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(expression.trimmingCharacters(in: .whitespaces).isEmpty)
+                .padding(PTKSpace.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        }
-        .padding()
-        .frame(width: 320)
-        .frame(maxHeight: 520)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .preferredColorScheme(selectedTheme.preferredColorScheme)
         .alert(
             "프로필 삭제",
@@ -295,38 +143,245 @@ struct SettingsSheetView: View {
         } message: { endpoint in
             Text("‘\(endpoint.name)’ 서비스를 삭제합니다.")
         }
+    }
 
+    private func header(actions: SettingsSheetActions) -> some View {
+        HStack(spacing: PTKSpace.md) {
+            Text("설정")
+                .font(PTKType.ui(13, weight: .semibold))
+
+            Spacer(minLength: 0)
+
+            Button("취소") {
+                actions.cancel()
+            }
+            .buttonStyle(.plain)
+            .font(PTKType.ui(12))
+            .foregroundStyle(PTKTheme.muted)
+            .keyboardShortcut(.cancelAction)
+
+            Button("저장") {
+                save(actions: actions)
+            }
+            .buttonStyle(.plain)
+            .font(PTKType.ui(12, weight: .semibold))
+            .foregroundStyle(
+                expression.trimmingCharacters(in: .whitespaces).isEmpty
+                    ? PTKTheme.faint
+                    : PTKTheme.accent
+            )
+            .disabled(expression.trimmingCharacters(in: .whitespaces).isEmpty)
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding(.horizontal, PTKSpace.md)
+        .frame(height: 36)
+    }
+
+    private func watchSection(
+        accessibility: SettingsSheetNotificationAccessibility,
+        notificationControls: SettingsAccessibility.PortChangeNotificationControls
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            PTKSectionLabel(title: "감시")
+
+            PTKInsetGroup {
+                TextField("예: 3000-3009,5173", text: $expression)
+                    .textFieldStyle(.plain)
+                    .font(PTKType.mono(12))
+                    .padding(PTKSpace.sm)
+                    .onChange(of: expression) { _ in
+                        expressionError = nil
+                    }
+
+                if let error = expressionError {
+                    Text(error)
+                        .font(PTKType.ui(11))
+                        .foregroundStyle(PTKTheme.danger)
+                        .padding(.horizontal, PTKSpace.sm)
+                        .padding(.bottom, 6)
+                        .accessibilityLabel("감시 포트 입력 오류: \(error)")
+                }
+
+                PTKHairline()
+                    .padding(.leading, PTKSpace.sm)
+
+                Toggle(isOn: Binding(
+                    get: { notificationPreference.isEnabled },
+                    set: { enabled in
+                        notificationPreference = SettingsDraft.notificationPreference(
+                            notificationPreference,
+                            settingEnabled: enabled,
+                            watchedExpression: expression
+                        )
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("포트 변경 알림")
+                            .font(PTKType.ui(12))
+                        Text("선택한 포트가 열리거나 닫힐 때 알려줍니다.")
+                            .font(PTKType.ui(11))
+                            .foregroundStyle(PTKTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .toggleStyle(.switch)
+                .padding(PTKSpace.sm)
+                .accessibilityLabel(accessibility.toggleLabel)
+                .accessibilityHint(accessibility.toggleHint)
+                .accessibilityIdentifier(accessibility.toggleIdentifier)
+
+                if notificationControls.showsPortExpression {
+                    PTKHairline()
+                        .padding(.leading, PTKSpace.sm)
+
+                    TextField("알림 포트", text: Binding(
+                        get: { notificationPreference.portsExpression ?? "" },
+                        set: { notificationPreference.portsExpression = $0 }
+                    ))
+                    .textFieldStyle(.plain)
+                    .font(PTKType.mono(12))
+                    .padding(PTKSpace.sm)
+                    .accessibilityLabel(accessibility.expressionLabel)
+                    .accessibilityHint(accessibility.expressionHint)
+                    .accessibilityIdentifier(accessibility.expressionIdentifier)
+
+                    if notificationControls.showsDeniedStatus {
+                        HStack(spacing: PTKSpace.sm) {
+                            Text("macOS에서 차단됨")
+                                .font(PTKType.ui(11))
+                                .foregroundStyle(PTKTheme.danger)
+                                .accessibilityLabel(accessibility.deniedStatusLabel)
+                                .accessibilityIdentifier(accessibility.deniedStatusIdentifier)
+                            if notificationControls.showsSystemSettingsButton {
+                                Button("시스템 설정 열기") {
+                                    viewModel.openNotificationSettings()
+                                }
+                                .buttonStyle(.plain)
+                                .font(PTKType.ui(11, weight: .medium))
+                                .foregroundStyle(PTKTheme.accent)
+                                .accessibilityLabel(accessibility.systemSettingsButtonLabel)
+                                .accessibilityHint(accessibility.systemSettingsButtonHint)
+                                .accessibilityIdentifier(accessibility.systemSettingsButtonIdentifier)
+                            }
+                        }
+                        .padding(.horizontal, PTKSpace.sm)
+                        .padding(.bottom, 8)
+                    }
+                    if let error = viewModel.notificationPermissionError {
+                        Text(error)
+                            .font(PTKType.ui(11))
+                            .foregroundStyle(PTKTheme.danger)
+                            .padding(.horizontal, PTKSpace.sm)
+                            .padding(.bottom, 8)
+                            .accessibilityLabel(accessibility.permissionErrorLabel(error))
+                            .accessibilityIdentifier(accessibility.permissionErrorIdentifier)
+                    }
+                    if let notificationExpressionError {
+                        Text(notificationExpressionError)
+                            .font(PTKType.ui(11))
+                            .foregroundStyle(PTKTheme.danger)
+                            .padding(.horizontal, PTKSpace.sm)
+                            .padding(.bottom, 8)
+                            .accessibilityLabel(accessibility.validationErrorLabel(notificationExpressionError))
+                            .accessibilityIdentifier(accessibility.validationErrorIdentifier)
+                    }
+                }
+            }
+        }
+    }
+
+    private var presetsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            PTKSectionLabel(title: "프리셋")
+            PTKInsetGroup {
+                ForEach(Array(viewModel.portPresets.enumerated()), id: \.element.id) { index, preset in
+                    if index > 0 {
+                        PTKHairline()
+                            .padding(.leading, PTKSpace.sm)
+                    }
+                    presetRow(preset)
+                }
+            }
+        }
+    }
+
+    private var displaySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            PTKSectionLabel(title: "표시")
+            PTKInsetGroup {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("새로고침 주기")
+                        .font(PTKType.ui(11))
+                        .foregroundStyle(PTKTheme.muted)
+                    Picker(SettingsAccessibility.refreshIntervalPickerLabel, selection: $selectedInterval) {
+                        ForEach(RefreshInterval.allCases, id: \.self) { interval in
+                            Text(interval.label).tag(interval)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .accessibilityHint(SettingsAccessibility.refreshIntervalPickerHint)
+
+                    Text("테마")
+                        .font(PTKType.ui(11))
+                        .foregroundStyle(PTKTheme.muted)
+                        .padding(.top, 4)
+                    Picker(SettingsAccessibility.themePickerLabel, selection: $selectedTheme) {
+                        ForEach(AppTheme.allCases, id: \.self) { theme in
+                            Text(theme.label).tag(theme)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .accessibilityHint(SettingsAccessibility.themePickerHint)
+                }
+                .padding(PTKSpace.sm)
+            }
+        }
     }
 
     private var customProfilesSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("사용자 프로필").font(.caption).foregroundStyle(.secondary)
-
-            HStack(spacing: 6) {
-                TextField("프로필 이름", text: $profileTitle)
-                    .textFieldStyle(.roundedBorder)
-
-                Button("저장") {
-                    do {
-                        customPortProfiles = try viewModel.addingCustomProfile(
-                            title: profileTitle,
-                            expression: expression,
-                            to: customPortProfiles
-                        )
-                        profileTitle = ""
-                        expressionError = nil
-                    } catch {
-                        expressionError = "\(error)"
+            PTKSectionLabel(title: "사용자 프로필")
+            PTKInsetGroup {
+                HStack(spacing: PTKSpace.sm) {
+                    TextField("프로필 이름", text: $profileTitle)
+                        .textFieldStyle(.plain)
+                        .font(PTKType.ui(12))
+                    Button("저장") {
+                        do {
+                            customPortProfiles = try viewModel.addingCustomProfile(
+                                title: profileTitle,
+                                expression: expression,
+                                to: customPortProfiles
+                            )
+                            profileTitle = ""
+                            expressionError = nil
+                        } catch {
+                            expressionError = "\(error)"
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .font(PTKType.ui(12, weight: .medium))
+                    .foregroundStyle(PTKTheme.accent)
+                    .disabled(
+                        profileTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || expression.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
+                    .accessibilityLabel("사용자 프로필 저장")
+                    .accessibilityHint("이름 \(profileTitle)의 프로필에 현재 감시 포트를 저장합니다.")
                 }
-                .disabled(profileTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || expression.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityLabel("사용자 프로필 저장")
-                .accessibilityHint("이름 \(profileTitle)의 프로필에 현재 감시 포트를 저장합니다.")
-            }
+                .padding(PTKSpace.sm)
 
-            if !customPortProfiles.isEmpty {
-                VStack(spacing: 6) {
-                    ForEach(customPortProfiles) { profile in
+                if !customPortProfiles.isEmpty {
+                    PTKHairline()
+                        .padding(.leading, PTKSpace.sm)
+                    ForEach(Array(customPortProfiles.enumerated()), id: \.element.id) { index, profile in
+                        if index > 0 {
+                            PTKHairline()
+                                .padding(.leading, PTKSpace.sm)
+                        }
                         customProfileRow(profile)
                     }
                 }
@@ -334,32 +389,119 @@ struct SettingsSheetView: View {
         }
     }
 
+    private var customServicesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            PTKSectionLabel(title: "서비스 포트")
+            PTKInsetGroup {
+                HStack(spacing: PTKSpace.sm) {
+                    TextField("이름", text: $serviceName)
+                        .textFieldStyle(.plain)
+                        .font(PTKType.ui(12))
+                    TextField("포트", text: $servicePort)
+                        .textFieldStyle(.plain)
+                        .font(PTKType.mono(12))
+                        .frame(width: 64)
+                    Button("추가") {
+                        do {
+                            customServiceEndpoints = try viewModel.addingCustomServiceEndpoint(
+                                name: serviceName,
+                                portText: servicePort,
+                                to: customServiceEndpoints
+                            )
+                            serviceName = ""
+                            servicePort = ""
+                            serviceError = nil
+                        } catch {
+                            serviceError = "\(error)"
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(PTKType.ui(12, weight: .medium))
+                    .foregroundStyle(PTKTheme.accent)
+                    .disabled(
+                        serviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || servicePort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
+                    .accessibilityLabel("서비스 \(serviceName) 추가")
+                    .accessibilityHint("포트 \(servicePort)의 서비스를 상태 목록에 추가합니다.")
+                }
+                .padding(PTKSpace.sm)
+
+                if let serviceError {
+                    Text(serviceError)
+                        .font(PTKType.ui(11))
+                        .foregroundStyle(PTKTheme.danger)
+                        .padding(.horizontal, PTKSpace.sm)
+                        .padding(.bottom, 8)
+                }
+
+                if !customServiceEndpoints.isEmpty {
+                    PTKHairline()
+                        .padding(.leading, PTKSpace.sm)
+                    ForEach(Array(customServiceEndpoints.enumerated()), id: \.element.id) { index, endpoint in
+                        if index > 0 {
+                            PTKHairline()
+                                .padding(.leading, PTKSpace.sm)
+                        }
+                        customServiceRow(endpoint)
+                    }
+                }
+            }
+        }
+    }
+
+    private func presetRow(_ preset: PortPreset) -> some View {
+        let isActive = expression == preset.expression
+        return Button {
+            expression = preset.expression
+            expressionError = nil
+        } label: {
+            HStack(spacing: PTKSpace.sm) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(preset.title)
+                        .font(PTKType.ui(12, weight: isActive ? .semibold : .regular))
+                        .foregroundStyle(PTKTheme.ink)
+                        .lineLimit(1)
+                    Text(preset.detail)
+                        .font(PTKType.ui(11))
+                        .foregroundStyle(PTKTheme.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if isActive {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PTKTheme.accent)
+                }
+            }
+            .padding(.horizontal, PTKSpace.sm)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(preset.expression)
+        .accessibilityLabel(SettingsAccessibility.presetApplyLabel(preset))
+        .accessibilityHint(SettingsAccessibility.presetApplyHint(preset))
+    }
+
     private func customProfileRow(_ profile: PortProfile) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: PTKSpace.sm) {
             Button {
                 expression = profile.expression
                 expressionError = nil
             } label: {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(profile.title)
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.primary)
+                        .font(PTKType.ui(12, weight: expression == profile.expression ? .semibold : .regular))
+                        .foregroundStyle(PTKTheme.ink)
                         .lineLimit(1)
                     Text(profile.expression)
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .font(PTKType.mono(10))
+                        .foregroundStyle(PTKTheme.muted)
                         .lineLimit(1)
                 }
-                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                .padding(.horizontal, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(expression == profile.expression ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(expression == profile.expression ? Color.accentColor.opacity(0.35) : Color.secondary.opacity(0.14), lineWidth: 1)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("프로필 적용: \(profile.expression)")
@@ -370,130 +512,77 @@ struct SettingsSheetView: View {
                 pendingProfileDeletion = profile
             } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(PTKTheme.muted)
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
             .help("프로필 삭제")
             .accessibilityLabel(SettingsAccessibility.profileDeleteLabel(profile))
             .accessibilityHint("이 사용자 프로필을 삭제합니다.")
         }
-    }
-
-    private var customServicesSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("서비스 포트").font(.caption).foregroundStyle(.secondary)
-
-            HStack(spacing: 6) {
-                TextField("이름", text: $serviceName)
-                    .textFieldStyle(.roundedBorder)
-                TextField("포트", text: $servicePort)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(width: 72)
-
-                Button("추가") {
-                    do {
-                        customServiceEndpoints = try viewModel.addingCustomServiceEndpoint(
-                            name: serviceName,
-                            portText: servicePort,
-                            to: customServiceEndpoints
-                        )
-                        serviceName = ""
-                        servicePort = ""
-                        serviceError = nil
-                    } catch {
-                        serviceError = "\(error)"
-                    }
-                }
-                .disabled(serviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || servicePort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityLabel("서비스 \(serviceName) 추가")
-                .accessibilityHint("포트 \(servicePort)의 서비스를 상태 목록에 추가합니다.")
-            }
-
-            if let serviceError {
-                Text(serviceError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            if !customServiceEndpoints.isEmpty {
-                VStack(spacing: 6) {
-                    ForEach(customServiceEndpoints) { endpoint in
-                        customServiceRow(endpoint)
-                    }
-                }
-            }
-        }
+        .padding(.horizontal, PTKSpace.sm)
+        .padding(.vertical, 8)
     }
 
     private func customServiceRow(_ endpoint: DatabaseEndpoint) -> some View {
-        HStack(spacing: 6) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: PTKSpace.sm) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(endpoint.name)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.primary)
+                    .font(PTKType.ui(12, weight: .medium))
+                    .foregroundStyle(PTKTheme.ink)
                     .lineLimit(1)
                 Text("Port \(endpoint.port)")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(PTKType.mono(10))
+                    .foregroundStyle(PTKTheme.muted)
                     .lineLimit(1)
             }
-            .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-            .padding(.horizontal, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.secondary.opacity(0.14), lineWidth: 1)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
                 pendingServiceDeletion = endpoint
             } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(PTKTheme.muted)
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
             .help("서비스 삭제")
             .accessibilityLabel(SettingsAccessibility.serviceDeleteLabel(endpoint))
             .accessibilityHint("이 서비스 포트를 상태 목록에서 삭제합니다.")
         }
+        .padding(.horizontal, PTKSpace.sm)
+        .padding(.vertical, 8)
     }
-    private func presetButton(_ preset: PortPreset) -> some View {
-        let isActive = expression == preset.expression
-        return Button {
-            expression = preset.expression
-            expressionError = nil
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(preset.title)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(preset.detail)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-            .padding(.horizontal, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isActive ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+
+    private func save(actions: SettingsSheetActions) {
+        expressionError = nil
+        notificationExpressionError = nil
+        settingsError = nil
+        do {
+            try actions.save(
+                SettingsDraft(
+                    portExpression: expression,
+                    refreshInterval: selectedInterval,
+                    theme: selectedTheme,
+                    customPortProfiles: customPortProfiles,
+                    customServiceEndpoints: customServiceEndpoints,
+                    portChangeNotificationPreference: notificationPreference
+                )
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(isActive ? Color.accentColor.opacity(0.35) : Color.secondary.opacity(0.14), lineWidth: 1)
+        } catch let error as SettingsDraftSaveError {
+            switch error {
+            case .watchedPorts(let error):
+                expressionError = "\(error)"
+            case .notificationPorts(let error):
+                notificationExpressionError = "\(error)"
+            case .customServices(let error):
+                serviceError = "\(error)"
+            case .storage(let error):
+                settingsError = "\(error)"
             }
+        } catch {
+            settingsError = "\(error)"
         }
-        .buttonStyle(.plain)
-        .help(preset.expression)
-        .accessibilityLabel(SettingsAccessibility.presetApplyLabel(preset))
-        .accessibilityHint(SettingsAccessibility.presetApplyHint(preset))
     }
 }
 
@@ -502,7 +591,6 @@ enum SettingsAccessibility {
     static let refreshIntervalPickerHint = "포트와 서비스 상태를 자동으로 확인할 주기를 선택합니다."
     static let themePickerLabel = "테마"
     static let themePickerHint = "PTK 화면에 사용할 밝기 테마를 선택합니다."
-
 
     static let portChangeNotificationToggleLabel = "포트 변경 알림"
     static let portChangeNotificationToggleHint = "선택한 포트가 열리거나 닫힐 때 알림을 받도록 켜거나 끕니다."

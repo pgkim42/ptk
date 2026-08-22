@@ -399,7 +399,7 @@ final class PortMonitorViewModel: ObservableObject {
     }
 
     var showsServiceGroupHeaders: Bool {
-        groupedServiceStatuses.count > 1 || customServiceEmptyMessage != nil
+        groupedServiceStatuses.count > 1
     }
 
     var serviceStatusSummary: String {

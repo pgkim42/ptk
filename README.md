@@ -184,9 +184,9 @@ the unsafe action unavailable.
 
 ### Settings
 
-![PTK settings sheet](docs/assets/ptk-settings.png)
+![PTK settings panel](docs/assets/ptk-settings.png)
 
-The settings sheet supports:
+The settings panel supports:
 
 - watched port expression editing
 - port presets for common local development stacks
@@ -201,7 +201,7 @@ The settings sheet supports:
 
 ### Port Presets and Quick Actions
 
-The settings sheet includes validated port presets:
+The settings panel includes validated port presets:
 
 | Preset | Expression |
 | --- | --- |

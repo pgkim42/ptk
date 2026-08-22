@@ -1,4 +1,4 @@
-public enum RefreshInterval: Double, CaseIterable, Equatable, Sendable {
+public enum RefreshInterval: Double, CaseIterable, Equatable, Hashable, Sendable {
     case oneSecond = 1
     case threeSeconds = 3
     case fiveSeconds = 5

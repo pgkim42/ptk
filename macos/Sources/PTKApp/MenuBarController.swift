@@ -417,13 +417,7 @@ final class MenuBarController: NSObject {
     }
 
     func writeSettingsSnapshot(to url: URL) throws {
-        let hosting = NSHostingController(rootView: SettingsSheetView(viewModel: viewModel, onDismiss: {}))
-        let fittingSize = hosting.sizeThatFits(in: NSSize(width: 320, height: 520))
-        hosting.view.frame = NSRect(
-            origin: .zero,
-            size: NSSize(width: 320, height: max(fittingSize.height, 180))
-        )
-        try writeSnapshot(of: hosting.view, to: url)
+        try writePanelSnapshot(to: url)
     }
 
     func writeButtonInteractionSnapshot(to url: URL) throws {

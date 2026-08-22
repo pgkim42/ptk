@@ -1,7 +1,7 @@
 import CoreFoundation
 import Foundation
 
-public enum AppTheme: String, CaseIterable, Equatable, Sendable {
+public enum AppTheme: String, CaseIterable, Equatable, Hashable, Sendable {
     case system
     case light
     case dark

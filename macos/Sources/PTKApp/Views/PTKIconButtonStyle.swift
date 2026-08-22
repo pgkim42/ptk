@@ -3,25 +3,36 @@ import SwiftUI
 struct PTKIconButtonVisualState: Equatable {
     let isHovering: Bool
     let isPressed: Bool
+    let isFocused: Bool
+    let isDisabled: Bool
+
+    init(
+        isHovering: Bool,
+        isPressed: Bool,
+        isFocused: Bool = false,
+        isDisabled: Bool = false
+    ) {
+        self.isHovering = isHovering
+        self.isPressed = isPressed
+        self.isFocused = isFocused
+        self.isDisabled = isDisabled
+    }
 
     var scale: CGFloat {
-        if isPressed { return 0.92 }
-        return isHovering ? 1.05 : 1.0
+        if isDisabled { return 1 }
+        return isPressed ? 0.98 : 1
     }
 
     var backgroundOpacity: Double {
-        if isPressed { return 0.22 }
-        return isHovering ? 0.13 : 0.0
-    }
-
-    var borderOpacity: Double {
-        if isPressed { return 0.28 }
-        return isHovering ? 0.20 : 0.0
+        if isDisabled { return 0 }
+        if isPressed { return 0.16 }
+        return isHovering ? 0.08 : 0
     }
 
     var iconOpacity: Double {
-        if isPressed { return 1.0 }
-        return isHovering ? 0.92 : 0.72
+        if isDisabled { return 0.45 }
+        if isPressed { return 1 }
+        return isHovering ? 0.92 : 0.78
     }
 }
 
@@ -44,16 +55,26 @@ private struct PTKIconButtonStyleBody: View {
     let tint: Color
     let size: CGFloat
     @State private var isHovering = false
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         PTKIconButtonSurface(
             tint: tint,
             size: size,
-            state: PTKIconButtonVisualState(isHovering: isHovering, isPressed: configuration.isPressed)
+            state: PTKIconButtonVisualState(
+                isHovering: isHovering,
+                isPressed: configuration.isPressed,
+                isFocused: isFocused,
+                isDisabled: !isEnabled
+            )
         ) {
             configuration.label
         }
         .onHover { isHovering = $0 }
+        .animation(PTKMotion.micro(reduceMotion: reduceMotion), value: configuration.isPressed)
+        .animation(PTKMotion.micro(reduceMotion: reduceMotion), value: isHovering)
     }
 }
 
@@ -79,44 +100,43 @@ private struct PTKIconButtonSurface<Label: View>: View {
         label
             .foregroundStyle(tint.opacity(state.iconOpacity))
             .frame(width: size, height: size)
-            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: PTKTheme.radiusControl, style: .continuous))
             .background {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: PTKTheme.radiusControl, style: .continuous)
                     .fill(tint.opacity(state.backgroundOpacity))
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(tint.opacity(state.borderOpacity), lineWidth: 1)
+                RoundedRectangle(cornerRadius: PTKTheme.radiusControl + 2, style: .continuous)
+                    .stroke(state.isFocused ? PTKTheme.focus : Color.clear, lineWidth: 2)
             }
             .scaleEffect(state.scale)
-            .animation(.easeOut(duration: 0.12), value: state)
     }
 }
 
 struct PTKButtonInteractionPreview: View {
     var body: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: PTKSpace.lg) {
             previewButton(
-                title: "Idle",
+                title: "대기",
                 systemName: "gearshape",
                 tint: PTKTheme.muted,
                 state: PTKIconButtonVisualState(isHovering: false, isPressed: false)
             )
             previewButton(
-                title: "Hover",
+                title: "호버",
                 systemName: "arrow.clockwise",
                 tint: PTKTheme.muted,
                 state: PTKIconButtonVisualState(isHovering: true, isPressed: false)
             )
             previewButton(
-                title: "Press",
+                title: "누름",
                 systemName: "xmark",
-                tint: PTKTheme.red,
+                tint: PTKTheme.danger,
                 state: PTKIconButtonVisualState(isHovering: true, isPressed: true)
             )
         }
-        .padding(18)
-        .background(PTKTheme.panel)
+        .padding(PTKSpace.lg)
+        .background(PTKTheme.paper)
     }
 
     private func previewButton(
@@ -125,13 +145,13 @@ struct PTKButtonInteractionPreview: View {
         tint: Color,
         state: PTKIconButtonVisualState
     ) -> some View {
-        VStack(spacing: 8) {
-            PTKIconButtonSurface(tint: tint, size: 30, state: state) {
+        VStack(spacing: PTKSpace.sm) {
+            PTKIconButtonSurface(tint: tint, size: 28, state: state) {
                 Image(systemName: systemName)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
             }
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
+                .font(PTKType.ui(10, weight: .medium))
                 .foregroundStyle(PTKTheme.faint)
         }
         .frame(width: 52)

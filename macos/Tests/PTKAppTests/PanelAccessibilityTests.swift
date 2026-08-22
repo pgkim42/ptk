@@ -6,6 +6,7 @@ import Testing
 
 @Suite struct PanelAccessibilityTests {
     @Test func serviceListReservesAGroupHeaderAndStatusRow() {
+        #expect(ServiceStatusListMetrics.statusRowHeight > ServiceStatusListMetrics.groupHeaderHeight)
         #expect(
             ServiceStatusListMetrics.minimumHeight
                 == ServiceStatusListMetrics.groupHeaderHeight + ServiceStatusListMetrics.statusRowHeight

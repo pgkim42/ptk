@@ -26,123 +26,129 @@ struct PortRowView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(PTKTheme.green)
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
+                PTKStatusDot(color: PTKTheme.running)
 
                 Text(verbatim: "\(status.port)")
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .foregroundStyle(PTKTheme.text)
+                    .font(PTKType.mono(12, weight: .semibold))
+                    .foregroundStyle(PTKTheme.ink)
+                    .monospacedDigit()
                     .lineLimit(1)
-                    .frame(width: 46, alignment: .leading)
+                    .frame(width: 44, alignment: .leading)
 
-                if let pid = status.pid {
-                    Text(verbatim: "PID \(pid)")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(PTKTheme.muted)
-                        .lineLimit(1)
-                        .frame(width: 68, alignment: .leading)
-                } else {
-                    Text("PID -")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(PTKTheme.faint)
-                        .lineLimit(1)
-                        .frame(width: 68, alignment: .leading)
-                }
+                processNameLabel
 
-                if let processDisplayName {
-                    Text(verbatim: processDisplayName)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(PTKTheme.text)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(processHelpText)
-                } else {
-                    Text("알 수 없음")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(PTKTheme.faint)
-                }
+                Spacer(minLength: 4)
 
-                Spacer()
+                pidLabel
 
-                Button {
-                    onOpen(status)
-                } label: {
-                    Image(systemName: "safari")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
-                .help("로컬 주소 열기")
-                .accessibilityLabel(PortRowAccessibility.openLabel(for: status))
-                .accessibilityHint(PortRowAccessibility.openHint(for: status))
-
-                Button {
-                    onCopy(status)
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
-                .help("로컬 주소 복사")
-                .accessibilityLabel(PortRowAccessibility.copyURLLabel(for: status))
-                .accessibilityHint(PortRowAccessibility.copyURLHint(for: status))
-
-                Button {
-                    onCopyDetails(status)
-                } label: {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
-                .help("포트 정보 복사")
-                .accessibilityLabel(PortRowAccessibility.copyDetailsLabel(for: status))
-                .accessibilityHint(PortRowAccessibility.copyDetailsHint(for: status))
-
-                if let target = status.killTarget {
-                    Button {
-                        onKill(target)
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .bold))
-                    }
-                    .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.red, size: 22))
-                    .disabled(isKillDisabled)
-                    .help(isKillDisabled ? "다른 프로세스 종료 처리 중" : "프로세스 종료")
-                    .accessibilityLabel(PortRowAccessibility.killLabel(for: target))
-                    .accessibilityHint(PortRowAccessibility.killHint)
-                } else if let reason = status.ptkKillUnavailableReason {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(PTKTheme.orange)
-                        .frame(width: 22, height: 22)
-                        .help(reason)
-                        .accessibilityHidden(true)
-                }
+                actions
             }
 
             if let diagnostic = status.ptkKillUnavailableDiagnostic {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 8, weight: .semibold))
-                    Text(diagnostic.title)
-                        .font(.system(size: 9, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .foregroundStyle(PTKTheme.orange)
-                .padding(.leading, 61)
-                .help(diagnosticHelpText(diagnostic))
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(PortRowAccessibility.diagnosticLabel(for: status, reason: diagnosticHelpText(diagnostic)))
+                Text(diagnostic.title)
+                    .font(PTKType.ui(10))
+                    .foregroundStyle(PTKTheme.caution)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .padding(.leading, 28)
+                    .help(diagnosticHelpText(diagnostic))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(PortRowAccessibility.diagnosticLabel(for: status, reason: diagnosticHelpText(diagnostic)))
             }
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, status.ptkKillUnavailableReason == nil ? 0 : 4)
+        .padding(.horizontal, PTKSpace.sm)
+        .padding(.vertical, status.ptkKillUnavailableReason == nil ? 0 : 3)
         .frame(minHeight: PortRowMetrics.height(for: status))
-        .background(Color.clear)
+        .contextMenu {
+            Button("로컬 주소 열기") { onOpen(status) }
+            Button("주소 복사") { onCopy(status) }
+            Button("정보 복사") { onCopyDetails(status) }
+            if let target = status.killTarget {
+                Divider()
+                Button("프로세스 종료", role: .destructive) { onKill(target) }
+                    .disabled(isKillDisabled)
+            }
+        }
+        .accessibilityAction(named: Text(PortRowAccessibility.copyDetailsLabel(for: status))) {
+            onCopyDetails(status)
+        }
+    }
+
+    @ViewBuilder
+    private var processNameLabel: some View {
+        if let processDisplayName {
+            Text(verbatim: processDisplayName)
+                .font(PTKType.ui(12))
+                .foregroundStyle(PTKTheme.ink)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(processHelpText)
+        } else {
+            Text("알 수 없음")
+                .font(PTKType.ui(12))
+                .foregroundStyle(PTKTheme.faint)
+        }
+    }
+
+    @ViewBuilder
+    private var pidLabel: some View {
+        if let pid = status.pid {
+            Text(verbatim: "\(pid)")
+                .font(PTKType.mono(10))
+                .foregroundStyle(PTKTheme.faint)
+                .monospacedDigit()
+                .lineLimit(1)
+                .help("PID \(pid)")
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 0) {
+            Button {
+                onOpen(status)
+            } label: {
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
+            .help("로컬 주소 열기")
+            .accessibilityLabel(PortRowAccessibility.openLabel(for: status))
+            .accessibilityHint(PortRowAccessibility.openHint(for: status))
+
+            Button {
+                onCopy(status)
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
+            .help("로컬 주소 복사")
+            .accessibilityLabel(PortRowAccessibility.copyURLLabel(for: status))
+            .accessibilityHint(PortRowAccessibility.copyURLHint(for: status))
+
+            if let target = status.killTarget {
+                Button {
+                    onKill(target)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .buttonStyle(PTKIconButtonStyle(tint: PTKTheme.muted, size: 22))
+                .disabled(isKillDisabled)
+                .help(isKillDisabled ? "다른 프로세스 종료 처리 중" : "프로세스 종료")
+                .accessibilityLabel(PortRowAccessibility.killLabel(for: target))
+                .accessibilityHint(PortRowAccessibility.killHint)
+            } else if status.ptkKillUnavailableReason != nil {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(PTKTheme.caution)
+                    .frame(width: 22, height: 22)
+                    .help(status.ptkKillUnavailableReason ?? "")
+                    .accessibilityHidden(true)
+            }
+        }
     }
 
     private var processDisplayName: String? {

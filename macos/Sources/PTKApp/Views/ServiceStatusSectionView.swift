@@ -5,49 +5,43 @@ struct ServiceStatusSectionView: View {
     @ObservedObject var viewModel: PortMonitorViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            PanelSectionHeaderView("Services", trailing: viewModel.serviceStatusSummary)
+        VStack(alignment: .leading, spacing: 6) {
+            PanelSectionHeaderView("서비스", trailing: viewModel.serviceStatusSummary)
 
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(viewModel.groupedServiceStatuses) { group in
-                        if viewModel.showsServiceGroupHeaders {
-                            PanelServiceGroupHeaderView(title: group.title)
-                        }
-                        ForEach(group.statuses, id: \.displayIdentity) { status in
-                            ServiceStatusRowView(status: status)
-                            if status.group == .builtIn, status.kind == .dockerDaemon {
-                                ForEach(viewModel.dockerContainerRows) { row in
-                                    DockerContainerPortRowView(
-                                        row: row,
-                                        onCopyURL: { viewModel.copyDockerContainerURL(for: row) }
-                                    )
+            PTKInsetGroup {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(viewModel.groupedServiceStatuses) { group in
+                            if viewModel.showsServiceGroupHeaders {
+                                PanelServiceGroupHeaderView(title: group.title)
+                            }
+                            ForEach(Array(group.statuses.enumerated()), id: \.element.displayIdentity) { index, status in
+                                if index > 0 || viewModel.showsServiceGroupHeaders {
+                                    PTKHairline()
+                                        .padding(.leading, 28)
+                                }
+                                ServiceStatusRowView(status: status)
+                                if status.group == .builtIn, status.kind == .dockerDaemon {
+                                    ForEach(viewModel.dockerContainerRows) { row in
+                                        DockerContainerPortRowView(
+                                            row: row,
+                                            onCopyURL: { viewModel.copyDockerContainerURL(for: row) }
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                    if let customServiceEmptyMessage = viewModel.customServiceEmptyMessage {
-                        PanelServiceGroupHeaderView(title: ServiceGroup.custom.label)
-                        ServiceStatusEmptyRowView(message: customServiceEmptyMessage)
-                    }
                 }
             }
-            .frame(
-                minHeight: ServiceStatusListMetrics.minimumHeight,
-                maxHeight: ServiceStatusListMetrics.maximumHeight
-            )
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(PTKTheme.table))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(PTKTheme.border, lineWidth: 1)
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
 }
 
 enum ServiceStatusListMetrics {
-    static let groupHeaderHeight: CGFloat = 18
-    static let statusRowHeight: CGFloat = 29
+    static let groupHeaderHeight: CGFloat = 20
+    static let statusRowHeight: CGFloat = 28
     static let minimumHeight = groupHeaderHeight + statusRowHeight
-    static let maximumHeight: CGFloat = 174
+    static let maximumHeight: CGFloat = 168
 }
