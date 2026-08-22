@@ -5,15 +5,6 @@ struct ContentView: View {
     static let panelSize = NSSize(width: 392, height: 540)
 
     @ObservedObject var viewModel: PortMonitorViewModel
-    let aiUsageSnapshotProvider: AIUsageSnapshotProvider
-
-    init(
-        viewModel: PortMonitorViewModel,
-        aiUsageSnapshotProvider: @escaping AIUsageSnapshotProvider = AIUsageSectionView.liveSnapshotProvider
-    ) {
-        self.viewModel = viewModel
-        self.aiUsageSnapshotProvider = aiUsageSnapshotProvider
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,10 +26,6 @@ struct ContentView: View {
 
                     if !viewModel.serviceStatuses.isEmpty {
                         ServiceStatusSectionView(viewModel: viewModel)
-                    }
-
-                    if viewModel.isAIUsageEnabled {
-                        AIUsageSectionView(snapshotProvider: aiUsageSnapshotProvider)
                     }
                 }
                 .padding(.horizontal, 12)

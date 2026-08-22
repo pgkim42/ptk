@@ -211,7 +211,6 @@ final class MenuBarController: NSObject {
     private let portScanWorker: PortScanWorker
     private let serviceSnapshotWorker: ServiceSnapshotWorker
     private let killWorker: KillWorker
-    private let aiUsageSnapshotProvider: AIUsageSnapshotProvider
     private var refreshScheduler: RefreshScheduler?
     private var statusItem: NSStatusItem?
     private var refreshTimer: Timer?
@@ -285,7 +284,6 @@ final class MenuBarController: NSObject {
         portScanWorker: PortScanWorker? = nil,
         serviceSnapshotWorker: ServiceSnapshotWorker? = nil,
         killWorker: KillWorker? = nil,
-        aiUsageSnapshotProvider: @escaping AIUsageSnapshotProvider = AIUsageSectionView.liveSnapshotProvider,
         notificationPermission: (any PortChangeNotificationPermissionProviding)? = nil,
         notificationDelivery: (any PortChangeNotificationDelivering)? = nil,
         notificationResponseHandler: (any PortChangeNotificationResponseHandling)? = nil,
@@ -299,7 +297,6 @@ final class MenuBarController: NSObject {
         self.killWorker = killWorker ?? { target in
             try killService.terminateAfterRevalidation(target: target)
         }
-        self.aiUsageSnapshotProvider = aiUsageSnapshotProvider
 
         let compositionPolicy = ServiceStatusCompositionPolicy()
         self.serviceSnapshotWorker = serviceSnapshotWorker ?? { customEndpoints in
@@ -522,10 +519,7 @@ final class MenuBarController: NSObject {
     }
 
     private func setupPanel() {
-        let contentView = ContentView(
-            viewModel: viewModel,
-            aiUsageSnapshotProvider: aiUsageSnapshotProvider
-        )
+        let contentView = ContentView(viewModel: viewModel)
         let hosting = NSHostingController(rootView: contentView)
         hosting.view.frame = NSRect(origin: .zero, size: ContentView.panelSize)
         hostingController = hosting

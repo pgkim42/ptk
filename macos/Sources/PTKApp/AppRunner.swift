@@ -28,7 +28,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings.watchedPortsExpression = "3000-3009,5173-5182,4200-4209,8080-8089"
         } else if snapshotKind == "panel-dense" {
             settings.watchedPortsExpression = "3000-3003"
-            settings.isAIUsageEnabled = true
         }
         self.snapshotURL = snapshotURL
         self.snapshotKind = snapshotKind
@@ -42,7 +41,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.notificationClient = notificationClient
         let scanner: PortScanner
         let serviceSnapshotWorker: ServiceSnapshotWorker?
-        let aiUsageSnapshotProvider = Self.aiUsageSnapshotProvider(snapshotKind: snapshotKind)
         if snapshotKind == "panel-docker" {
             scanner = Self.dockerPanelSnapshotScanner
             serviceSnapshotWorker = { _ in Self.dockerPanelSnapshot() }
@@ -58,7 +56,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 settings: settings,
                 scanner: scanner,
                 serviceSnapshotWorker: serviceSnapshotWorker,
-                aiUsageSnapshotProvider: aiUsageSnapshotProvider,
                 notificationPermission: notificationClient,
                 notificationDelivery: notificationClient,
                 notificationResponseHandler: notificationClient
@@ -69,7 +66,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 settings: settings,
                 scanner: scanner,
                 serviceSnapshotWorker: serviceSnapshotWorker,
-                aiUsageSnapshotProvider: aiUsageSnapshotProvider,
                 notificationPermission: snapshotClient,
                 notificationDelivery: snapshotClient
             )
@@ -85,28 +81,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static func effectiveSnapshotKind(requestedKind: String, snapshotURL: URL?) -> String {
         snapshotURL == nil ? "panel" : requestedKind
     }
-
-    static func aiUsageSnapshotProvider(snapshotKind: String) -> AIUsageSnapshotProvider {
-        guard snapshotKind == "panel-dense" else {
-            return AIUsageSectionView.liveSnapshotProvider
-        }
-        return {
-            AIUsageSnapshot(
-                checkedAt: Date(timeIntervalSince1970: 0),
-                providers: [
-                    AIUsageProviderStatus(
-                        provider: .claude,
-                        windows: [AIUsageWindow(label: "5시간", usedPercentage: 28, resetsAt: nil)]
-                    ),
-                    AIUsageProviderStatus(
-                        provider: .codex,
-                        windows: [AIUsageWindow(label: "주간", usedPercentage: 43, resetsAt: nil)]
-                    )
-                ]
-            )
-        }
-    }
-
     private static var dockerPanelSnapshotScanner: PortScanner {
         PortScanner(
             connector: SnapshotSocketConnector(openPorts: [3000, 5173]),

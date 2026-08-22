@@ -277,7 +277,6 @@ import Testing
 
         var draft = viewModel.makeSettingsDraft()
         draft.theme = .dark
-        draft.isAIUsageEnabled = true
         draft.customPortProfiles = try viewModel.addingCustomProfile(
             title: "Temporary",
             expression: "5173",
@@ -288,7 +287,6 @@ import Testing
 
         let reloaded = AppSettings(store: store)
         #expect(reloaded.theme == .system)
-        #expect(!reloaded.isAIUsageEnabled)
         #expect(try reloaded.loadCustomPortProfiles().map(\.title) == ["Original"])
         #expect(try reloaded.loadCustomServiceEndpoints().map(\.name) == ["Search"])
     }
@@ -320,22 +318,19 @@ import Testing
         }
     }
 
-    @Test func settingsSavePublishesNormalizedExpressionAndAIOptIn() throws {
+    @Test func settingsSavePublishesNormalizedExpression() throws {
         let store = InMemorySettingsStore()
         let settings = AppSettings(store: store)
         let viewModel = makeViewModel(settings: settings)
         let preset = AppDefaults.portPresets[0]
         var draft = viewModel.makeSettingsDraft()
         draft.portExpression = "  \(preset.expression)  "
-        draft.isAIUsageEnabled = true
 
         try viewModel.saveSettingsDraft(draft)
 
         #expect(settings.watchedPortsExpression == preset.expression)
         #expect(viewModel.portExpression == preset.expression)
         #expect(viewModel.currentProfileTitle == preset.title)
-        #expect(settings.isAIUsageEnabled)
-        #expect(viewModel.isAIUsageEnabled)
     }
 
     @MainActor

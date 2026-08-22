@@ -8,7 +8,6 @@
 - `PTKCore/Shell`: PTK 메뉴 막대 앱 공통 로직
 - `PTKCore/Features/PortMonitor`: 포트 파싱, 스캔, 프로세스 조회, 종료 안전 로직
 - `PTKCore/Features/ServiceMonitor`: Docker daemon, Docker published port, 주요 로컬 DB 포트 상태 표시 로직
-- `PTKCore/Features/AIUsage`: opt-in Claude/Codex 사용량 조회와 응답 파싱
 - `PTKCoreTests`: core 단위 테스트
 - `PTKAppTests`: 앱 통합, 알림 조정, 네이티브 알림 클라이언트, 접근성 테스트
 
@@ -31,10 +30,6 @@ wildcard/loopback의 단일 숫자 TCP host 포트만 `http://localhost:<port>`�
 포함하지 않습니다. 포트 표기는 `bind:host -> container/protocol` 형식이며,
 동일 scope의 IPv4/IPv6 dual-stack bind는 한 번만 표시합니다.
 
-AI Credits는 설정에서 직접 켜야만 표시하고 조회하며 기본값은 꺼짐입니다.
-Claude는 macOS Keychain, Codex는 `CODEX_HOME` 또는 `~/.codex`의 file-backed
-`auth.json`만 읽습니다. 사용량 snapshot은 메모리에만 10분간 cache하며,
-Codex keyring 인증은 현재 지원하지 않습니다.
 
 저장된 감시 포트 프로필은 패널에서 빠르게 전환할 수 있고, 사용자 정의
 서비스는 기본 서비스와 구분되는 read-only 그룹으로 표시합니다. 사용자 정의

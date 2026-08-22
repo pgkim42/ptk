@@ -104,23 +104,6 @@ PTK는 설정된 포트 표현식을 주기적으로 스캔하고, 감시 대상
 알림 설정에도 이름, 설명, 입력 오류, 권한 상태, macOS 설정 열기 동작을
 구분해서 제공합니다.
 
-### 선택형 AI 사용량
-
-AI Credits 영역은 기본적으로 꺼져 있습니다. 설정에서 **AI 사용량 표시**를
-직접 켜면 PTK가 기존 로컬 로그인 정보를 읽고 10분마다 사용량을 조회합니다.
-조회 결과는 메모리에만 보관하며, 각 도구의 자격증명 저장소에는 쓰지 않습니다.
-
-- Claude는 macOS Keychain의 기존 `Claude Code-credentials` 항목을 읽고
-  `api.anthropic.com`에서 사용량을 조회합니다.
-- Codex는 현재 파일 기반 인증만 지원합니다. `CODEX_HOME` 또는 기본
-  `~/.codex`의 `auth.json`을 읽어 `chatgpt.com`에서 사용량을 조회합니다.
-  Keychain 기반 Codex 세션은 읽지 않으며, 로그아웃으로 오진하지 않고 지원되는
-  파일 인증이 없다고 표시합니다.
-
-Codex 자체는 file, keyring, auto 자격증명 저장을 지원하지만, PTK는 Codex App
-Server 런타임 의존성을 추가하지 않습니다. 따라서 현재 Codex 카드는 이 제한을
-명시한 선택형 연동입니다.
-
 ### 포트 변경 알림
 
 `0.6.0` 릴리스 준비에는 선택한 포트의 로컬 알림이 포함됩니다. 새로 설치하거나
@@ -213,7 +196,6 @@ PTK는 `SIGTERM`만 보냅니다. 강제 종료, 불일치 무시, 모호한 수
 - 사용자 정의 읽기 전용 서비스 포트 확인
 - 새로고침 주기: `1s`, `3s`, `5s`, `10s`
 - 테마 선택: 시스템, 라이트, 다크
-- AI 사용량 표시: 명시적 opt-in, 기본값 꺼짐
 - `UserDefaults` 기반 설정 저장
 - 저장된 감시 포트 프로필 빠른 전환
 - 포트 변경 알림: 사용 여부, 선택 포트 표현식, macOS 권한 상태
@@ -351,7 +333,6 @@ macos/
 │           │   └── Settings/    # UserDefaults 기반 설정
 │           ├── ServiceMonitor/
 │           │   └── Services/    # Docker 포트와 로컬 DB 상태 확인
-│           └── AIUsage/          # opt-in Claude/Codex 사용량 조회
 └── Tests/
     ├── PTKAppTests/
     └── PTKCoreTests/
@@ -388,7 +369,6 @@ macos/
 - 서비스 명령 timeout 처리
 - 앱 view model 동작
 - 알림의 신뢰할 수 있는 전환, 동의와 권한, 전달 억제, 클릭 경로
-- 선택형 AI 사용량 파싱, 자격증명 경로 선택, 오류 분류
 
 ## 아직 범위 밖인 것
 

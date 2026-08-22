@@ -152,7 +152,6 @@ public final class AppSettings {
         public static let watchedPortsExpression = "watchedPortsExpression"
         public static let refreshInterval = "refreshIntervalSeconds"
         public static let theme = "theme"
-        public static let aiUsageEnabled = "aiUsageEnabled"
         public static let customPortProfiles = "customPortProfiles"
         public static let customServiceEndpoints = "customServiceEndpoints"
         public static let portChangeNotificationsEnabled = "portChangeNotificationsEnabled"
@@ -208,12 +207,6 @@ public final class AppSettings {
         }
         set { store.set(newValue.rawValue, forKey: Key.theme) }
     }
-
-    public var isAIUsageEnabled: Bool {
-        get { store.bool(forKey: Key.aiUsageEnabled) ?? false }
-        set { store.set(newValue, forKey: Key.aiUsageEnabled) }
-    }
-
     public var customPortProfiles: [PortProfile] {
         (try? loadCustomPortProfiles()) ?? []
     }
@@ -287,7 +280,6 @@ public final class AppSettings {
         profiles: [PortProfile],
         serviceEndpoints: [DatabaseEndpoint],
         portChangeNotificationPreference: PortChangeNotificationPreference,
-        isAIUsageEnabled: Bool = false,
         parser: PortRangeParser = PortRangeParser()
     ) throws {
         _ = try loadCustomPortProfiles()
@@ -337,9 +329,6 @@ public final class AppSettings {
         }
         if store.string(forKey: Key.theme) != theme.rawValue {
             store.set(theme.rawValue, forKey: Key.theme)
-        }
-        if store.bool(forKey: Key.aiUsageEnabled) != isAIUsageEnabled {
-            store.set(isAIUsageEnabled, forKey: Key.aiUsageEnabled)
         }
         if store.string(forKey: Key.customPortProfiles) != encodedProfiles {
             store.set(encodedProfiles, forKey: Key.customPortProfiles)

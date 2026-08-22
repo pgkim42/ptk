@@ -53,6 +53,5 @@ import Testing
         #expect(ServiceGroup.custom.label == "사용자 서비스")
         #expect(ServiceState.stopped.label == "중지됨")
         #expect(ServiceState.unavailable.label == "확인 불가")
-        #expect(SettingsAccessibility.aiUsageToggleLabel == "AI 사용량 표시")
     }
 }

@@ -22,12 +22,6 @@ struct UserNotificationClientTests {
         #expect(AppDelegate.canUseUserNotifications(bundleIdentifier: "") == false)
     }
 
-    @Test func denseSnapshotUsesFixtureAIUsageWithoutLiveCredentials() async {
-        let snapshot = await AppDelegate.aiUsageSnapshotProvider(snapshotKind: "panel-dense")()
-
-        #expect(snapshot.providers.map(\.provider) == [.claude, .codex])
-        #expect(snapshot.providers.flatMap(\.windows).map(\.usedPercentage) == [28, 43])
-    }
 
     @Test func qaKindWithoutSnapshotPathCannotEnableFixtures() {
         #expect(AppDelegate.effectiveSnapshotKind(

@@ -8,7 +8,6 @@ import Foundation
         #expect(settings.watchedPortsExpression == AppDefaults.defaultWatchedPortsExpression)
         #expect(settings.refreshInterval == .threeSeconds)
         #expect(settings.theme == .system)
-        #expect(!settings.isAIUsageEnabled)
     }
 
     @Test func persistsWatchedPortsRefreshIntervalAndTheme() {
@@ -18,13 +17,11 @@ import Foundation
         settings.watchedPortsExpression = "3000,5173"
         settings.refreshInterval = .tenSeconds
         settings.theme = .dark
-        settings.isAIUsageEnabled = true
 
         let reloaded = AppSettings(store: store)
         #expect(reloaded.watchedPortsExpression == "3000,5173")
         #expect(reloaded.refreshInterval == .tenSeconds)
         #expect(reloaded.theme == .dark)
-        #expect(reloaded.isAIUsageEnabled)
     }
 
     @Test func validatedWatchedPortsUpdateRejectsInvalidExpressionWithoutPersisting() throws {
@@ -142,12 +139,10 @@ import Foundation
             profiles: [],
             serviceEndpoints: [legacyEndpoint],
             portChangeNotificationPreference: .init(isEnabled: false, portsExpression: nil),
-            isAIUsageEnabled: true
         )
 
         #expect(settings.customServiceEndpoints == [legacyEndpoint])
         #expect(settings.theme == .dark)
-        #expect(settings.isAIUsageEnabled)
         #expect(throws: AppSettingsError.builtInServicePort(6379)) {
             try settings.replaceSettings(
                 watchedPortsExpression: "3000",
@@ -156,7 +151,6 @@ import Foundation
                 profiles: [],
                 serviceEndpoints: [DatabaseEndpoint(name: "Renamed Redis", port: 6379)],
                 portChangeNotificationPreference: .init(isEnabled: false, portsExpression: nil),
-                isAIUsageEnabled: true
             )
         }
     }

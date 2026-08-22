@@ -102,24 +102,6 @@ when they would only repeat nearby text. Settings controls for notifications
 also expose labels, hints, validation errors, permission status, and the macOS
 Settings action.
 
-### Optional AI Usage
-
-The AI Credits section is off by default. Enabling **AI usage display** in
-Settings explicitly allows PTK to read existing local login credentials and
-request usage data every 10 minutes. PTK keeps the resulting snapshot only in
-memory and does not write to either provider's credential store.
-
-- Claude reads the existing `Claude Code-credentials` item from macOS Keychain
-  and requests usage from `api.anthropic.com`.
-- Codex currently supports file-backed authentication only. It reads
-  `auth.json` from `CODEX_HOME` (or `~/.codex` by default) and requests usage
-  from `chatgpt.com`. Keyring-backed Codex sessions are not read and are shown
-  as unsupported file authentication instead of being reported as signed out.
-
-Codex supports file, keyring, and automatic credential storage, but PTK does
-not add a runtime dependency on the Codex App Server. The Codex card is therefore
-an explicitly limited integration for now.
-
 ### Port-Change Notifications
 
 `0.6.0` release preparation adds an opt-in local notification for selected
@@ -211,7 +193,6 @@ The settings sheet supports:
 - custom read-only service port checks
 - refresh interval selection: `1s`, `3s`, `5s`, `10s`
 - theme selection: system, light, dark
-- AI usage display: explicit opt-in, off by default
 - persistence through `UserDefaults`
 - quick switching for saved watched-port profiles
 - port-change notifications: opt-in switch, selected-port expression, and macOS permission status
@@ -349,7 +330,6 @@ macos/
 │           │   └── Settings/    # UserDefaults-backed settings
 │           ├── ServiceMonitor/
 │           │   └── Services/    # Docker ports and local DB status checks
-│           └── AIUsage/          # opt-in Claude and Codex quota snapshots
 └── Tests/
     ├── PTKAppTests/
     └── PTKCoreTests/
@@ -387,7 +367,6 @@ Current test coverage focuses on:
 - app view model behavior
 - notification reliable transitions, consent and permission, delivery
   suppression, and click routing
-- opt-in AI usage parsing, credential-path selection, and error classification
 
 ## Not In Scope Yet
 

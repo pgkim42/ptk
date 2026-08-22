@@ -26,16 +26,6 @@ This line is not released yet. PTK has no published binary artifacts.
   separate notification history.
 - Preserve the Swift-native runtime and existing fail-closed `SIGTERM`-only
   process-termination safety model.
-
-### AI usage
-
-- Add an AI Credits glance for Claude and Codex behind an explicit setting that
-  is off by default. Enabling it allows read-only access to existing local
-  credentials and 10-minute usage refreshes.
-- Honor `CODEX_HOME` for file-backed Codex authentication, distinguish missing
-  file support from general sign-out, parse dynamic limit durations, and report
-  malformed provider responses accurately.
-
 ### Reliability and release preparation
 
 - Keep helper and TCP probe timeouts bounded, classify an empty `lsof` result
