@@ -19,14 +19,14 @@ assert_file() {
 assert_contains() {
   local path="$1"
   local expected="$2"
-  grep -Fq "$expected" "$path" || fail "$path contains: $expected"
+  grep -Fq -- "$expected" "$path" || fail "$path contains: $expected"
   pass "$path contains: $expected"
 }
 
 assert_not_contains() {
   local path="$1"
   local unexpected="$2"
-  ! grep -Fq "$unexpected" "$path" || fail "$path does not contain: $unexpected"
+  ! grep -Fq -- "$unexpected" "$path" || fail "$path does not contain: $unexpected"
   pass "$path does not contain: $unexpected"
 }
 
@@ -51,7 +51,7 @@ assert_contains README.md "A native macOS menu bar utility for safely inspecting
 assert_contains README.md "![PTK menu bar panel](docs/assets/ptk-panel.png)"
 assert_contains README.md "## Why PTK?"
 assert_contains README.md "## Project Health"
-assert_contains README.md "Current release preparation: \`0.6.0\`"
+assert_contains README.md "Current release preparation: \`0.1.0\`"
 assert_contains README.md "Published binary artifacts: none"
 assert_contains README.md "### Port-Change Notifications"
 assert_contains README.md "opt-in local notification for selected"
@@ -68,7 +68,7 @@ assert_contains README.ko.md "로컬 개발 포트를 안전하게 확인하고 
 assert_contains README.ko.md "![PTK 메뉴 막대 패널](docs/assets/ptk-panel.png)"
 assert_contains README.ko.md "## 왜 PTK인가?"
 assert_contains README.ko.md "## 프로젝트 상태"
-assert_contains README.ko.md "현재 릴리스 준비 버전: \`0.6.0\`"
+assert_contains README.ko.md "현재 릴리스 준비 버전: \`0.1.0\`"
 assert_contains README.ko.md "공개 바이너리 배포: 없음"
 assert_contains README.ko.md "### 포트 변경 알림"
 assert_contains README.ko.md "선택한 포트의 로컬 알림"
@@ -100,6 +100,7 @@ assert_contains CODE_OF_CONDUCT.md "Scope"
 assert_contains CODE_OF_CONDUCT.md "GitHub reporting tools"
 
 assert_file .github/workflows/ci.yml
+assert_file .github/workflows/release-draft.yml
 assert_contains .github/workflows/ci.yml "macos-latest"
 assert_contains .github/workflows/ci.yml "swift test"
 assert_contains .github/workflows/ci.yml "swift build"
@@ -108,6 +109,9 @@ assert_contains .github/workflows/ci.yml "tests/release-readiness.sh"
 assert_contains .github/workflows/ci.yml "tests/release-publication-readiness.sh"
 assert_contains .github/workflows/ci.yml "tests/ci-workflow-readiness.sh"
 assert_not_contains .github/workflows/ci.yml "xcodebuild"
+assert_contains .github/workflows/release-draft.yml "--draft"
+assert_contains .github/workflows/release-draft.yml "scripts/package-release.sh"
+assert_not_contains .github/workflows/release-draft.yml "xcodebuild"
 
 assert_file .github/ISSUE_TEMPLATE/bug_report.yml
 assert_file .github/ISSUE_TEMPLATE/feature_request.yml

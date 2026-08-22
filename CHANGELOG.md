@@ -2,7 +2,7 @@
 
 All notable PTK changes are tracked here.
 
-## [0.6.0] — Release preparation
+## [0.1.0] — Release preparation
 
 This line is not released yet. PTK has no published binary artifacts.
 
@@ -26,6 +26,7 @@ This line is not released yet. PTK has no published binary artifacts.
   separate notification history.
 - Preserve the Swift-native runtime and existing fail-closed `SIGTERM`-only
   process-termination safety model.
+
 ### Reliability and release preparation
 
 - Keep helper and TCP probe timeouts bounded, classify an empty `lsof` result
@@ -37,12 +38,11 @@ This line is not released yet. PTK has no published binary artifacts.
   while notifications are off, and prevent duplicate kill confirmations.
 - Build universal Apple Silicon and Intel release artifacts and compare the
   documented publication state with GitHub Releases in CI.
+- Package unsigned DMG and ZIP files from a later version tag and upload
+  them to a draft GitHub Release without publishing it. The `0.1.0`
+  heading remains unreleased preparation, not a tag to push.
 
-## [0.5.0] — Completed development line
-
-This development line was completed but was not published as a GitHub Release.
-
-### Added
+### Current product surface
 
 - Native menu bar port monitoring with manual refresh, saved profiles, common
   development-stack presets, and open/copy localhost actions.
@@ -51,30 +51,8 @@ This development line was completed but was not published as a GitHub Release.
 - Compact change summaries, process details, screenshots, and bilingual
   installation guidance.
 - Unsigned DMG and ZIP packaging plus release and repository readiness checks.
-
-### Changed
-
-- Consolidated the active product path on the Swift package under `macos/`.
-- Improved panel empty, warning, error, and accessibility states.
-- Reduced background scan cadence while the panel is closed.
-
-### Safety
-
 - Process termination remains fail-closed with confirmation, immediate target
   revalidation, mismatch and ambiguous-listener blocking, and `SIGTERM` only.
-- Process and scan command execution is asynchronous and lifecycle-safe.
-
-### Verification
-
-Run these commands from the repository root for the `0.5.0` development line:
-
-```bash
-cd macos && swift test
-cd macos && swift build
-cd macos && xcodebuild -scheme PTK -destination 'platform=macOS' test
-tests/open-source-readiness.sh
-tests/release-readiness.sh
-```
 
 ### Known limitations
 

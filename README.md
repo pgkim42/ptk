@@ -34,7 +34,7 @@ tool stays trustworthy as it grows.
 
 ## Status
 
-- Current release preparation: `0.6.0` (not yet released)
+- Current release preparation: `0.1.0` (not yet released)
 - Published binary artifacts: none
 - Platform: macOS 13+ on Apple Silicon and Intel
 - Runtime: Swift, AppKit, SwiftUI
@@ -56,7 +56,9 @@ update server yet.
 ## Project Health
 
 - CI runs Swift package tests, Swift build, release readiness, and repository
-  readiness checks.
+  readiness checks. Pushing a version tag later packages unsigned artifacts
+  onto a draft GitHub Release; it does not publish that release or imply
+  that `0.1.0` is ready to ship.
 - `CONTRIBUTING.md` documents verification commands and the process-termination
   safety boundary.
 - `SECURITY.md` covers private reporting and safe handling of machine-specific
@@ -104,7 +106,7 @@ Settings action.
 
 ### Port-Change Notifications
 
-`0.6.0` release preparation adds an opt-in local notification for selected
+`0.1.0` release preparation adds an opt-in local notification for selected
 ports. It is off by default for new and upgraded configurations. On first
 enable, PTK copies the watched expression only when the notification expression
 is empty; the expressions are independent afterward. They share the

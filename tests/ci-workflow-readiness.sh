@@ -18,7 +18,7 @@ assert_file() {
 assert_contains() {
   local path="$1"
   local expected="$2"
-  grep -Fq "$expected" "$path" || fail "$path contains: $expected"
+  grep -Fq -- "$expected" "$path" || fail "$path contains: $expected"
   pass "$path contains: $expected"
 }
 
@@ -100,11 +100,20 @@ for command in (
     "tests/ci-workflow-readiness.sh",
 ):
     require(command in workflow, f"repository metadata runs {command}")
-
 require("uses: actions/checkout@v6.0.2" in workflow, "workflow uses the pinned checkout action")
 require("uses: actions/checkout@v4" not in workflow, "workflow does not use checkout v4")
 require(re.search(r"\bxcodebuild\b", workflow) is None, "workflow does not run xcodebuild")
 require("GH_TOKEN: ${{ github.token }}" in workflow, "publication check receives the GitHub token")
+
+draft = Path(".github/workflows/release-draft.yml").read_text()
+require('tags:' in draft and '"v[0-9]+.[0-9]+.[0-9]+"' in draft, "draft workflow is tag-triggered")
+require("contents: write" in draft, "draft workflow can create a draft release")
+require("--draft" in draft, "draft workflow creates a draft release")
+require("gh release create" in draft, "draft workflow uses gh release create")
+require("scripts/package-release.sh" in draft, "draft workflow packages unsigned artifacts")
+require("uses: actions/checkout@v6.0.2" in draft, "draft workflow uses the pinned checkout action")
+require(re.search(r"\bxcodebuild\b", draft) is None, "draft workflow does not run xcodebuild")
+require("continue-on-error:" not in draft, "draft workflow does not continue on error")
 
 if failures:
     for failure in failures:
@@ -114,6 +123,7 @@ PY
 }
 
 assert_file .github/workflows/ci.yml
+assert_file .github/workflows/release-draft.yml
 assert_file tests/release-publication-readiness.sh
 validate_workflow
 assert_contains macos/Tests/PTKAppTests/MenuBarControllerTests.swift "@Suite(.serialized) struct MenuBarControllerTests"

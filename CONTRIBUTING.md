@@ -54,6 +54,11 @@ Documentation and repository metadata can be checked with:
 tests/open-source-readiness.sh
 ```
 
+A version tag such as `v1.2.3` packages unsigned DMG and ZIP files and
+uploads them to a draft GitHub Release. That path does not publish the
+release or change the documented binary publication state. Do not treat
+the current `0.1.0` preparation heading as a tag to push.
+
 ## Default Watched Ports
 
 When changing the default watched-port profile, update these together:

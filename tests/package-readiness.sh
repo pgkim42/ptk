@@ -158,18 +158,18 @@ test_successful_package() {
 
   root="$(setup_fixture success)"
   PATH="$root/mock-bin:$PATH" PTK_TEST_ROOT="$root" \
-    "$root/scripts/package-release.sh" 0.5.0 42 >/dev/null
+    "$root/scripts/package-release.sh" 0.1.0 42 >/dev/null
 
   plist="$root/dist/PTK.app/Contents/Info.plist"
   [[ -x "$root/dist/PTK.app/Contents/MacOS/PTK" ]] || fail "generated app contains an executable"
-  [[ "$(plutil -extract CFBundleShortVersionString raw -o - "$plist")" == "0.5.0" ]] ||
+  [[ "$(plutil -extract CFBundleShortVersionString raw -o - "$plist")" == "0.1.0" ]] ||
     fail "generated app contains the display version"
   [[ "$(plutil -extract CFBundleVersion raw -o - "$plist")" == "42" ]] ||
     fail "generated app contains the build version"
-  unzip -tqq "$root/dist/PTK-macos-0.5.0-unsigned.zip"
-  ! zipinfo -1 "$root/dist/PTK-macos-0.5.0-unsigned.zip" | grep -E '(^|/)\._|^__MACOSX/' >/dev/null ||
+  unzip -tqq "$root/dist/PTK-macos-0.1.0-unsigned.zip"
+  ! zipinfo -1 "$root/dist/PTK-macos-0.1.0-unsigned.zip" | grep -E '(^|/)\._|^__MACOSX/' >/dev/null ||
     fail "generated ZIP contains AppleDouble metadata"
-  [[ -s "$root/dist/PTK-macos-0.5.0-unsigned.dmg" ]] || fail "generated DMG is non-empty"
+  [[ -s "$root/dist/PTK-macos-0.1.0-unsigned.dmg" ]] || fail "generated DMG is non-empty"
   assert_no_temporary_output "$root"
   pass "generated release artifacts are structurally valid"
 }
@@ -182,10 +182,10 @@ test_invalid_versions() {
   for arguments in \
     "release 1" \
     "0.5 1" \
-    "0.5.0-beta 1" \
-    "0.5.0 release" \
-    "0.5.0 1.2.3.4" \
-    "0.5.0 12345"; do
+    "0.1.0-beta 1" \
+    "0.1.0 release" \
+    "0.1.0 1.2.3.4" \
+    "0.1.0 12345"; do
     if PATH="$root/mock-bin:$PATH" PTK_TEST_ROOT="$root" \
       "$root/scripts/package-release.sh" $arguments >/dev/null 2>&1; then
       fail "invalid version is rejected: $arguments"
@@ -202,7 +202,7 @@ test_appledouble_metadata_is_rejected() {
 
   root="$(setup_fixture appledouble)"
   if PATH="$root/mock-bin:$PATH" PTK_TEST_ROOT="$root" PTK_TEST_ZIPINFO_APPLEDOUBLE=1 \
-    "$root/scripts/package-release.sh" 0.5.0 42 >/dev/null 2>&1; then
+    "$root/scripts/package-release.sh" 0.1.0 42 >/dev/null 2>&1; then
     fail "AppleDouble metadata is rejected"
   fi
 
@@ -217,18 +217,18 @@ test_failure_preserves_previous_release() {
   root="$(setup_fixture failure)"
   mkdir -p "$root/dist/PTK.app"
   printf 'old app\n' > "$root/dist/PTK.app/marker"
-  printf 'old zip\n' > "$root/dist/PTK-macos-0.5.0-unsigned.zip"
-  printf 'old dmg\n' > "$root/dist/PTK-macos-0.5.0-unsigned.dmg"
+  printf 'old zip\n' > "$root/dist/PTK-macos-0.1.0-unsigned.zip"
+  printf 'old dmg\n' > "$root/dist/PTK-macos-0.1.0-unsigned.dmg"
 
   if PATH="$root/mock-bin:$PATH" PTK_TEST_ROOT="$root" FAIL_HDIUTIL_CREATE=1 \
-    "$root/scripts/package-release.sh" 0.5.0 42 >/dev/null 2>&1; then
+    "$root/scripts/package-release.sh" 0.1.0 42 >/dev/null 2>&1; then
     fail "failed packaging returns a failure"
   fi
 
   [[ "$(< "$root/dist/PTK.app/marker")" == "old app" ]] || fail "previous app is preserved"
-  [[ "$(< "$root/dist/PTK-macos-0.5.0-unsigned.zip")" == "old zip" ]] ||
+  [[ "$(< "$root/dist/PTK-macos-0.1.0-unsigned.zip")" == "old zip" ]] ||
     fail "previous ZIP is preserved"
-  [[ "$(< "$root/dist/PTK-macos-0.5.0-unsigned.dmg")" == "old dmg" ]] ||
+  [[ "$(< "$root/dist/PTK-macos-0.1.0-unsigned.dmg")" == "old dmg" ]] ||
     fail "previous DMG is preserved"
   assert_no_temporary_output "$root"
   pass "failed packaging preserves previous artifacts"
@@ -243,7 +243,7 @@ test_symlinked_output_is_rejected() {
   ln -s "$root/external" "$root/dist"
 
   if PATH="$root/mock-bin:$PATH" PTK_TEST_ROOT="$root" \
-    "$root/scripts/package-release.sh" 0.5.0 42 >/dev/null 2>&1; then
+    "$root/scripts/package-release.sh" 0.1.0 42 >/dev/null 2>&1; then
     fail "symlinked output directory is rejected"
   fi
 
@@ -253,10 +253,10 @@ test_symlinked_output_is_rejected() {
   root="$(setup_fixture symlink-file)"
   mkdir -p "$root/dist" "$root/external"
   printf 'keep\n' > "$root/external/archive"
-  ln -s "$root/external/archive" "$root/dist/PTK-macos-0.5.0-unsigned.zip"
+  ln -s "$root/external/archive" "$root/dist/PTK-macos-0.1.0-unsigned.zip"
 
   if PATH="$root/mock-bin:$PATH" PTK_TEST_ROOT="$root" \
-    "$root/scripts/package-release.sh" 0.5.0 42 >/dev/null 2>&1; then
+    "$root/scripts/package-release.sh" 0.1.0 42 >/dev/null 2>&1; then
     fail "symlinked artifact path is rejected"
   fi
 
@@ -283,7 +283,7 @@ assert_contains scripts/package-release.sh "ZIP contains AppleDouble metadata"
 assert_contains scripts/package-release.sh '[[ " $ARCHITECTURES " == *" arm64 "* ]]'
 assert_contains scripts/package-release.sh '[[ " $ARCHITECTURES " == *" x86_64 "* ]]'
 
-assert_contains README.md "Current release preparation: \`0.6.0\`"
+assert_contains README.md "Current release preparation: \`0.1.0\`"
 assert_contains README.md "Published binary artifacts: none"
 assert_contains README.md "### Port-Change Notifications"
 assert_contains README.md "opt-in local notification for selected"
@@ -293,7 +293,7 @@ assert_contains README.md "does not have a published binary release yet"
 assert_contains README.md "PTK does not include automatic updates yet"
 assert_contains README.md "rebuild the app manually"
 
-assert_contains README.ko.md "현재 릴리스 준비 버전: \`0.6.0\`"
+assert_contains README.ko.md "현재 릴리스 준비 버전: \`0.1.0\`"
 assert_contains README.ko.md "공개 바이너리 배포: 없음"
 assert_contains README.ko.md "### 포트 변경 알림"
 assert_contains README.ko.md "선택한 포트의 로컬 알림"
@@ -305,10 +305,14 @@ assert_contains README.ko.md "앱을 다시 빌드"
 
 assert_contains docs/roadmap.md "Unsigned DMG and ZIP release artifacts"
 assert_contains docs/roadmap.md "Universal Apple Silicon and Intel release packaging"
-assert_contains docs/roadmap.md "## v0.6.0 — current release preparation"
+assert_contains docs/roadmap.md "## v0.1.0 — current release preparation"
 assert_contains docs/roadmap.md "local port-change notification"
+assert_contains docs/roadmap.md "draft GitHub Release"
 assert_contains tests/release-readiness.sh "tests/package-readiness.sh"
 assert_not_contains tests/open-source-readiness.sh "tests/package-readiness.sh"
+assert_file .github/workflows/release-draft.yml
+assert_contains .github/workflows/release-draft.yml "--draft"
+assert_contains .github/workflows/release-draft.yml "scripts/package-release.sh"
 
 test_successful_package
 test_invalid_versions

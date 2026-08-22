@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   printf 'usage: %s <display-version> <build-version>\n' "$0" >&2
-  printf 'example: %s 0.5.0 42\n' "$0" >&2
+  printf 'example: %s 0.1.0 42\n' "$0" >&2
 }
 
 if [[ $# -ne 2 || -z "${1:-}" || -z "${2:-}" ]]; then

@@ -1,0 +1,125 @@
+name: Draft release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: draft-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package draft artifacts
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Derive version
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "error: tag must look like v1.2.3: ${tag}" >&2
+            exit 64
+          fi
+          {
+            echo "tag=${tag}"
+            echo "version=${version}"
+            echo "zip=PTK-macos-${version}-unsigned.zip"
+            echo "dmg=PTK-macos-${version}-unsigned.dmg"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Require changelog heading
+        run: |
+          python3 - "${{ steps.version.outputs.version }}" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          version = sys.argv[1]
+          changelog = Path("CHANGELOG.md").read_text()
+          pattern = rf"^## \[{re.escape(version)}\](?:\s|$)"
+          if re.search(pattern, changelog, re.MULTILINE) is None:
+              raise SystemExit(f"CHANGELOG.md has no heading for {version}")
+          PY
+
+      - name: Test package
+        timeout-minutes: 5
+        run: swift test
+        working-directory: macos
+
+      - name: Package unsigned artifacts
+        timeout-minutes: 8
+        run: scripts/package-release.sh "${{ steps.version.outputs.version }}" "${{ github.run_number }}"
+
+      - name: Verify packaged artifacts
+        run: |
+          zip="dist/${{ steps.version.outputs.zip }}"
+          dmg="dist/${{ steps.version.outputs.dmg }}"
+          [[ -s "$zip" ]]
+          [[ -s "$dmg" ]]
+          unzip -tqq "$zip"
+          if zipinfo -1 "$zip" | grep -E '(^|/)\._|^__MACOSX/' >/dev/null; then
+            echo "error: ZIP contains AppleDouble metadata" >&2
+            exit 1
+          fi
+          hdiutil verify "$dmg" >/dev/null
+
+      - name: Create or refresh draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ZIP_NAME: ${{ steps.version.outputs.zip }}
+          DMG_NAME: ${{ steps.version.outputs.dmg }}
+        run: |
+          notes="$(
+            python3 - "$VERSION" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          version = sys.argv[1]
+          changelog = Path("CHANGELOG.md").read_text()
+          match = re.search(
+              rf"^## \[{re.escape(version)}\][^\n]*\n(?P<body>.*?)(?=^## \[|\Z)",
+              changelog,
+              re.MULTILINE | re.DOTALL,
+          )
+          body = match.group("body").strip() if match else ""
+          print(body)
+          PY
+          )"
+          if [[ -z "$notes" ]]; then
+            notes="Draft artifacts for ${TAG}. These files are unsigned."
+          fi
+
+          existing="$(gh release view "$TAG" --json isDraft,url --jq '.url' 2>/dev/null || true)"
+          if [[ -n "$existing" ]]; then
+            is_draft="$(gh release view "$TAG" --json isDraft --jq '.isDraft')"
+            if [[ "$is_draft" != "true" ]]; then
+              echo "error: ${TAG} is already a published release" >&2
+              exit 1
+            fi
+            gh release edit "$TAG" --draft --title "PTK ${VERSION}" --notes "$notes"
+          else
+            gh release create "$TAG" \
+              --draft \
+              --verify-tag \
+              --title "PTK ${VERSION}" \
+              --notes "$notes"
+          fi
+
+          gh release upload "$TAG" \
+            "dist/${ZIP_NAME}" \
+            "dist/${DMG_NAME}" \
+            --clobber

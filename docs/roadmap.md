@@ -3,16 +3,16 @@
 PTK stays small on purpose. The roadmap favors a credible macOS utility and
 maintainable open-source project shape over broad feature count.
 
-The current preparation target is `0.6.0`, as named in the versioned release
+The current preparation target is `0.1.0`, as named in the versioned release
 preparation entry in `CHANGELOG.md`. This file tracks direction and completion
 state without serving as a second version authority. PTK has no published binary
 release yet.
 
-## v0.6.0 — current release preparation
+## v0.1.0 — current release preparation
 
-Goal: add a bounded, local port-change notification without changing PTK's
+Goal: keep a bounded local port-change notification without changing PTK's
 Swift-native runtime or process-termination safety boundary. This line is not
-released, and no earlier binary artifact is published.
+released, and no binary artifact is published.
 
 Release preparation scope:
 
@@ -35,21 +35,13 @@ Release preparation scope:
   notification history.
 - Preserve `SIGTERM`-only, fail-closed termination and the Swift-only native
   runtime.
+- Native menu bar port monitoring with watched-port scanning and manual refresh.
+- Unsigned DMG and ZIP release artifacts.
 - Universal Apple Silicon and Intel release packaging, with publication
   metadata verified in CI.
-
-## v0.5.0 — completed development line
-
-Delivered in that line:
-
-- Swift-only native menu bar app with watched-port scanning and manual refresh.
-- Editable watched-port profiles and presets for common development stacks.
-- Safe process termination with confirmation, immediate revalidation, mismatch
-  and ambiguous-listener blocking, and `SIGTERM` only.
-- Quick actions for localhost URLs, process details, and open-port summaries.
-- Read-only Docker published-port and common local database diagnostics.
-- Unsigned DMG and ZIP release artifacts with bilingual installation guidance.
-- CI, release-readiness, and public repository policy checks.
+- Tag-triggered packaging that uploads unsigned DMG and ZIP files to a
+  draft GitHub Release without publishing it. The current `0.1.0`
+  heading remains a preparation label, not a tag to push.
 
 Current maintenance priorities:
 
@@ -59,12 +51,6 @@ Current maintenance priorities:
   data.
 - Keep compact panel controls and diagnostics usable with VoiceOver.
 - Preserve existing release artifacts when packaging validation fails.
-
-## Archived planning milestones
-
-The early `v0.1.0`, `v0.2.0`, and `v0.4.0` plans were development milestones.
-Their completed work is consolidated into the `0.5.0` changelog and completed
-development line above instead of remaining as open roadmap work.
 
 ## Later considerations
 
