@@ -453,8 +453,8 @@ final class PortMonitorViewModel: ObservableObject {
     }
 
     func saveExpression(_ expression: String) throws {
-        let oldPorts = try parser.parse(portExpression)
         let newPorts = try parser.parse(expression)
+        let oldPorts = (try? parser.parse(portExpression)) ?? []
         try settings.updateWatchedPortsExpression(expression, parser: parser)
         portExpression = expression
         onWatchedPortsCommitted(Set(oldPorts), Set(newPorts))
@@ -501,10 +501,10 @@ final class PortMonitorViewModel: ObservableObject {
 
     func saveSettingsDraft(_ unnormalizedDraft: SettingsDraft) throws {
         let draft = unnormalizedDraft.applyingNotificationEnablePolicy()
-        let oldPorts: [UInt16]
+        // An invalid stored expression has no active watched ports and must remain repairable.
+        let oldPorts = (try? parser.parse(portExpression)) ?? []
         let newPorts: [UInt16]
         do {
-            oldPorts = try parser.parse(portExpression)
             newPorts = try parser.parse(draft.portExpression)
         } catch {
             throw SettingsDraftSaveError.watchedPorts(error)

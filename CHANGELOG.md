@@ -29,6 +29,8 @@ This line is not released yet. PTK has no published binary artifacts.
 
 ### Reliability and release preparation
 
+- Allow settings saves and profile selection to repair an invalid stored
+  watched-port expression while still rejecting invalid replacement values.
 - Keep helper and TCP probe timeouts bounded, classify an empty `lsof` result
   correctly, and preserve the existing confirmation, revalidation, mismatch
   blocking, and `SIGTERM`-only termination policy.

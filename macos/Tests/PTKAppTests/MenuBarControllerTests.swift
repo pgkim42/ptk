@@ -318,6 +318,70 @@ import Testing
         }
     }
 
+    @Test(arguments: [false, true])
+    func invalidStoredWatchedPortsCanBeRepaired(usingProfile: Bool) throws {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000-broken"
+        var committedPorts: [(Set<UInt16>, Set<UInt16>)] = []
+        var refreshCount = 0
+        let viewModel = PortMonitorViewModel(
+            settings: settings,
+            onRefresh: {},
+            onSettingsRefresh: { refreshCount += 1 },
+            onWatchedPortsCommitted: { committedPorts.append(($0, $1)) }
+        )
+
+        if usingProfile {
+            try viewModel.applyProfileOption(
+                PortProfileOption(id: "repair", title: "API", expression: "8080")
+            )
+        } else {
+            var draft = viewModel.makeSettingsDraft()
+            draft.portExpression = "8080"
+            try SettingsSheetActions(viewModel: viewModel, onDismiss: {}).save(draft)
+        }
+
+        #expect(settings.watchedPortsExpression == "8080")
+        #expect(viewModel.portExpression == "8080")
+        #expect(refreshCount == 1)
+        #expect(committedPorts.count == 1)
+        #expect(committedPorts.first?.0 == Set<UInt16>())
+        #expect(committedPorts.first?.1 == Set<UInt16>([8080]))
+    }
+
+    @Test(arguments: [false, true])
+    func invalidReplacementDoesNotCommitOrRefresh(usingProfile: Bool) {
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.watchedPortsExpression = "3000"
+        var refreshCount = 0
+        var commitCount = 0
+        let viewModel = PortMonitorViewModel(
+            settings: settings,
+            onRefresh: {},
+            onSettingsRefresh: { refreshCount += 1 },
+            onWatchedPortsCommitted: { _, _ in commitCount += 1 }
+        )
+
+        #expect(throws: (any Error).self) {
+            if usingProfile {
+                try viewModel.applyProfileOption(
+                    PortProfileOption(id: "invalid", title: "Invalid", expression: "broken")
+                )
+            } else {
+                var draft = viewModel.makeSettingsDraft()
+                draft.portExpression = "broken"
+                draft.theme = .dark
+                try viewModel.saveSettingsDraft(draft)
+            }
+        }
+
+        #expect(settings.watchedPortsExpression == "3000")
+        #expect(viewModel.portExpression == "3000")
+        #expect(settings.theme == .system)
+        #expect(refreshCount == 0)
+        #expect(commitCount == 0)
+    }
+
     @Test func settingsSavePublishesNormalizedExpression() throws {
         let store = InMemorySettingsStore()
         let settings = AppSettings(store: store)
