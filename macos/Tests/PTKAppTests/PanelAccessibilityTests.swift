@@ -16,7 +16,7 @@ import Testing
 
     @MainActor
     @Test func diagnosticRowRendersTallerThanRegularRow() {
-        let regular = PortStatus(port: 3000, isOpen: true, pid: 42, processName: "node")
+        let regular = PortStatus(port: 3000, isOpen: true, pid: 42, processName: "node", startTime: fixtureStartTime)
         let diagnostic = PortStatus(port: 5173, isOpen: true)
         let regularHost = NSHostingView(rootView: PortRowView(
             status: regular,
@@ -39,7 +39,7 @@ import Testing
     }
 
     @Test func panelLabelsUseConsistentKoreanTerms() {
-        let port = PortStatus(port: 3000, isOpen: true, pid: 42, processName: "node")
+        let port = PortStatus(port: 3000, isOpen: true, pid: 42, processName: "node", startTime: fixtureStartTime)
         let service = ServiceStatus(name: "PostgreSQL", detail: "5432", state: .running)
         let dockerRow = DockerContainerPortRow(id: "api", name: "api", detail: "3000 -> 3000")
 
@@ -56,3 +56,5 @@ import Testing
         #expect(ServiceState.unavailable.label == "확인 불가")
     }
 }
+
+private let fixtureStartTime = ProcessStartTime(seconds: 1, microseconds: 0)

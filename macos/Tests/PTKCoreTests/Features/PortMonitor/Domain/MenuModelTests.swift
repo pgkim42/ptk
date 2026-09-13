@@ -4,6 +4,20 @@ import Testing
 @testable import PTKCore
 
 @Suite struct MenuModelTests {
+    @Test func samePIDAndNameWithNewStartTimeIsAProcessChange() {
+        let previous = PortStatus(
+            port: 3000, isOpen: true, pid: 111, processName: "node",
+            startTime: fixtureStartTime
+        )
+        let current = PortStatus(
+            port: 3000, isOpen: true, pid: 111, processName: "node",
+            startTime: ProcessStartTime(seconds: 1, microseconds: 1)
+        )
+        let changes = PortChange.detect(previous: [previous], current: [current])
+        #expect(changes.count == 1)
+        #expect(changes.first?.kind == .changed)
+    }
+
     @Test func rowsExposeWhyKillCannotBeRequested() {
         let rows = MenuModel(statuses: [
             PortStatus(port: 3000, isOpen: true),
@@ -13,7 +27,7 @@ import Testing
                 isOpen: true,
                 message: "ambiguous process lookup: port 3002 has PIDs 1, 2"
             ),
-            PortStatus(port: 3003, isOpen: true, pid: 333, processName: "node"),
+            PortStatus(port: 3003, isOpen: true, pid: 333, processName: "node", startTime: fixtureStartTime),
             PortStatus(port: 3004, isOpen: false)
         ]).rows
 
@@ -25,11 +39,11 @@ import Testing
     }
 
     @Test func verifiedIdentityValidatesAndPortStatusNormalizesIdentity() throws {
-        let identity = try #require(VerifiedProcessIdentity(pid: 42, processName: "  node \n"))
+        let identity = try #require(VerifiedProcessIdentity(pid: 42, processName: "  node \n", startTime: fixtureStartTime))
         #expect(identity.pid == 42)
         #expect(identity.processName == "node")
-        #expect(VerifiedProcessIdentity(pid: 0, processName: "node") == nil)
-        #expect(VerifiedProcessIdentity(pid: 42, processName: " \n") == nil)
+        #expect(VerifiedProcessIdentity(pid: 0, processName: "node", startTime: fixtureStartTime) == nil)
+        #expect(VerifiedProcessIdentity(pid: 42, processName: " \n", startTime: fixtureStartTime) == nil)
 
         let open = PortStatus(port: 3000, isOpen: true, identityState: .verified(identity))
         #expect(open.identityState == .verified(identity))
@@ -37,13 +51,14 @@ import Testing
         #expect(open.pid == 42)
         #expect(open.processName == "node")
         #expect(open.message == nil)
-        #expect(open.killTarget == KillTarget(port: 3000, pid: 42, processName: "node"))
+        #expect(open.killTarget == KillTarget(port: 3000, pid: 42, processName: "node", startTime: fixtureStartTime))
 
         let legacyOpen = PortStatus(
             port: 3000,
             isOpen: true,
             pid: 42,
-            processName: "  node \n"
+            processName: "  node \n",
+            startTime: fixtureStartTime
         )
         #expect(legacyOpen.identityState == .verified(identity))
         #expect(legacyOpen.killTarget == open.killTarget)
@@ -80,8 +95,8 @@ import Testing
     }
 
     @Test func portChangeBaselineRetainsVerifiedIdentityThroughUnavailableSamples() throws {
-        let identityA = try #require(VerifiedProcessIdentity(pid: 10, processName: "node"))
-        let identityB = try #require(VerifiedProcessIdentity(pid: 20, processName: "vite"))
+        let identityA = try #require(VerifiedProcessIdentity(pid: 10, processName: "node", startTime: fixtureStartTime))
+        let identityB = try #require(VerifiedProcessIdentity(pid: 20, processName: "vite", startTime: fixtureStartTime))
         let verifiedA = PortStatus(port: 3000, isOpen: true, identityState: .verified(identityA))
         let verifiedB = PortStatus(port: 3000, isOpen: true, identityState: .verified(identityB))
         let lookupFailure = PortStatus(
@@ -119,13 +134,13 @@ import Testing
         let occurredAt = Date(timeIntervalSince1970: 1_700_000_000)
         let previous = [
             PortStatus(port: 3000, isOpen: false),
-            PortStatus(port: 3001, isOpen: true, pid: 10, processName: "node"),
-            PortStatus(port: 3002, isOpen: true, pid: 20, processName: "vite")
+            PortStatus(port: 3001, isOpen: true, pid: 10, processName: "node", startTime: fixtureStartTime),
+            PortStatus(port: 3002, isOpen: true, pid: 20, processName: "vite", startTime: fixtureStartTime)
         ]
         let current = [
-            PortStatus(port: 3000, isOpen: true, pid: 30, processName: "rails"),
+            PortStatus(port: 3000, isOpen: true, pid: 30, processName: "rails", startTime: fixtureStartTime),
             PortStatus(port: 3001, isOpen: false),
-            PortStatus(port: 3002, isOpen: true, pid: 21, processName: "vite")
+            PortStatus(port: 3002, isOpen: true, pid: 21, processName: "vite", startTime: fixtureStartTime)
         ]
 
         let changes = PortChange.detect(previous: previous, current: current, occurredAt: occurredAt)
@@ -138,3 +153,5 @@ import Testing
     }
 
 }
+
+private let fixtureStartTime = ProcessStartTime(seconds: 1, microseconds: 0)

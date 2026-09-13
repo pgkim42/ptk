@@ -4,7 +4,7 @@ import PTKCore
 
 typealias PortScanWorker = @Sendable ([UInt16]) throws -> [PortStatus]
 typealias ServiceSnapshotWorker = @Sendable ([DatabaseEndpoint]) throws -> ServiceSnapshot
-typealias KillWorker = @Sendable (KillTarget) throws -> Void
+typealias KillWorker = @Sendable (KillTarget) async throws -> Void
 
 enum KillRequestResult: Sendable {
     case settled(errorMessage: String?)
@@ -295,7 +295,7 @@ final class MenuBarController: NSObject {
             scanner.scan(ports: ports)
         }
         self.killWorker = killWorker ?? { target in
-            try killService.terminateAfterRevalidation(target: target)
+            try await killService.terminateAndWaitForPortRelease(target: target)
         }
 
         let compositionPolicy = ServiceStatusCompositionPolicy()
@@ -812,7 +812,7 @@ final class MenuBarController: NSObject {
         let task = Task<String?, Never>.detached(priority: .userInitiated) { [killWorker, target] in
             guard !Task.isCancelled else { return nil }
             do {
-                try killWorker(target)
+                try await killWorker(target)
                 return nil
             } catch {
                 return "\(error)"

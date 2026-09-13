@@ -12,10 +12,10 @@ public struct PortProcessInfo: Equatable, Sendable {
         self.identity = identity
     }
 
-    init(port: UInt16, pid: Int, processName: String) {
+    init(port: UInt16, pid: Int, processName: String, startTime: ProcessStartTime) {
         self.init(
             port: port,
-            identity: VerifiedProcessIdentity(pid: pid, processName: processName)!
+            identity: VerifiedProcessIdentity(pid: pid, processName: processName, startTime: startTime)!
         )
     }
 }
@@ -26,6 +26,8 @@ public enum ProcessLookupError: Error, Equatable, CustomStringConvertible {
     case ambiguousListeners(port: UInt16, pids: [Int])
     case untrustedListeners(port: UInt16, reasons: [LsofUntrustedReason])
     case processNameUnavailable(pid: Int)
+    case processStartTimeUnavailable(pid: Int)
+    case processChangedDuringLookup(pid: Int)
 
     public var description: String {
         switch self {
@@ -43,6 +45,10 @@ public enum ProcessLookupError: Error, Equatable, CustomStringConvertible {
             return "untrusted listeners for port \(port): \(reasonList)"
         case .processNameUnavailable(let pid):
             return "process name unavailable for PID \(pid)"
+        case .processStartTimeUnavailable(let pid):
+            return "process start time unavailable for PID \(pid); refresh and try again"
+        case .processChangedDuringLookup(let pid):
+            return "process changed during lookup for PID \(pid); refresh and try again"
         }
     }
 }
@@ -50,10 +56,20 @@ public enum ProcessLookupError: Error, Equatable, CustomStringConvertible {
 public struct ProcessLookup: Sendable {
     private let runner: ProcessRunning
     private let parser: LsofParser
+    private let startTime: @Sendable (Int) -> ProcessStartTime?
 
     public init(runner: ProcessRunning = SystemProcessRunner(), parser: LsofParser = LsofParser()) {
+        self.init(runner: runner, parser: parser, startTime: { ProcessStartTime.read(pid: $0) })
+    }
+
+    public init(
+        runner: ProcessRunning,
+        parser: LsofParser = LsofParser(),
+        startTime: @escaping @Sendable (Int) -> ProcessStartTime?
+    ) {
         self.runner = runner
         self.parser = parser
+        self.startTime = startTime
     }
 
     public func listeningSnapshot() throws -> LsofSnapshot {
@@ -121,10 +137,19 @@ public struct ProcessLookup: Sendable {
             )
         }
 
-        guard
-            let processName = try processName(pid: pid),
-            let identity = VerifiedProcessIdentity(pid: pid, processName: processName)
-        else {
+        guard let before = startTime(pid) else {
+            throw ProcessLookupError.processStartTimeUnavailable(pid: pid)
+        }
+        guard let processName = try processName(pid: pid) else {
+            throw ProcessLookupError.processNameUnavailable(pid: pid)
+        }
+        guard let after = startTime(pid) else {
+            throw ProcessLookupError.processStartTimeUnavailable(pid: pid)
+        }
+        guard before == after else {
+            throw ProcessLookupError.processChangedDuringLookup(pid: pid)
+        }
+        guard let identity = VerifiedProcessIdentity(pid: pid, processName: processName, startTime: after) else {
             throw ProcessLookupError.processNameUnavailable(pid: pid)
         }
         return PortProcessInfo(port: port, identity: identity)

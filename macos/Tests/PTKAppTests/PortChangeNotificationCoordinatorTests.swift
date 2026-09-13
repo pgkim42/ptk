@@ -254,7 +254,7 @@ private func verified(_ port: UInt16, _ pid: Int, _ name: String) -> PortStatus 
     PortStatus(
         port: port,
         isOpen: true,
-        identityState: .verified(VerifiedProcessIdentity(pid: pid, processName: name)!)
+        identityState: .verified(VerifiedProcessIdentity(pid: pid, processName: name, startTime: fixtureStartTime)!)
     )
 }
 
@@ -265,3 +265,5 @@ private func unreliable(_ port: UInt16) -> PortStatus {
         identityState: .unavailable(.lookupFailed(message: "temporary"))
     )
 }
+
+private let fixtureStartTime = ProcessStartTime(seconds: 1, microseconds: 0)

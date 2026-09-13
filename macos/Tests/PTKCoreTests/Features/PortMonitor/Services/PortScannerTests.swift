@@ -4,6 +4,37 @@ import Testing
 @testable import PTKCore
 
 @Suite struct PortScannerTests {
+    @Test func nativeScanPreservesStartTimeThroughKillTarget() throws {
+        let listener = try BoundIPv4Socket(isListening: true)
+        let expectedStart = try #require(ProcessStartTime.read(pid: Int(getpid())))
+        let status = try #require(PortScanner().scan(ports: [listener.port]).first)
+        let target = try #require(status.killTarget)
+        #expect(target.pid == Int(getpid()))
+        #expect(target.identity.startTime == expectedStart)
+        #expect(target.identity == status.verifiedIdentity)
+        withExtendedLifetime(listener) {}
+    }
+
+    @Test func missingStartTimeKeepsPortOpenButDisablesKill() {
+        let runner = FakeProcessRunner()
+        runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
+            exitCode: 0,
+            stdout: """
+            COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+            node 111 me 1u IPv4 0x1 0t0 TCP 127.0.0.1:3000 (LISTEN)
+            """
+        )
+        let statuses = PortScanner(
+            connector: FakeSocketConnector(openPorts: [3000]),
+            lookup: ProcessLookup(runner: runner, startTime: { _ in nil })
+        ).scan(ports: [3000])
+        #expect(statuses.first?.isOpen == true)
+        #expect(statuses.first?.killTarget == nil)
+        #expect(statuses.first?.identityState == .unavailable(.lookupFailed(
+            message: ProcessLookupError.processStartTimeUnavailable(pid: 111).description
+        )))
+    }
+
     @Test func systemConnectorConnectsToLocalListenerWithinBudget() throws {
         let listener = try BoundIPv4Socket(isListening: true)
         let startedAt = ProcessInfo.processInfo.systemUptime
@@ -95,7 +126,7 @@ import Testing
         )
         let scanner = PortScanner(
             connector: connector,
-            lookup: ProcessLookup(runner: runner),
+            lookup: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime }),
             timeout: 1
         )
 
@@ -106,14 +137,14 @@ import Testing
                 port: 3000,
                 isOpen: true,
                 identityState: .verified(
-                    VerifiedProcessIdentity(pid: 111, processName: "node")!
+                    VerifiedProcessIdentity(pid: 111, processName: "node", startTime: fixtureStartTime)!
                 )
             ),
             PortStatus(
                 port: 3001,
                 isOpen: true,
                 identityState: .verified(
-                    VerifiedProcessIdentity(pid: 222, processName: "vite")!
+                    VerifiedProcessIdentity(pid: 222, processName: "vite", startTime: fixtureStartTime)!
                 )
             )
         ])
@@ -132,7 +163,7 @@ import Testing
         )
         let scanner = PortScanner(
             connector: RecordingSocketConnector(),
-            lookup: ProcessLookup(runner: runner)
+            lookup: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime })
         )
 
         let status = scanner.scan(ports: [3000])[0]
@@ -154,7 +185,7 @@ import Testing
         )
         let scanner = PortScanner(
             connector: RecordingSocketConnector(openHostsByPort: [3000: ["::1"]]),
-            lookup: ProcessLookup(runner: runner)
+            lookup: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime })
         )
 
         let status = scanner.scan(ports: [3000])[0]
@@ -175,7 +206,7 @@ import Testing
         )
         let scanner = PortScanner(
             connector: RecordingSocketConnector(openHostsByPort: [5173: ["::1"]]),
-            lookup: ProcessLookup(runner: runner)
+            lookup: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime })
         )
 
         let status = scanner.scan(ports: [5173])[0]
@@ -334,3 +365,5 @@ private final class RecordingSocketConnector: SocketConnecting, @unchecked Senda
         return openHostsByPort[port]?.contains(host) == true && elapsed <= timeout
     }
 }
+
+private let fixtureStartTime = ProcessStartTime(seconds: 1, microseconds: 0)

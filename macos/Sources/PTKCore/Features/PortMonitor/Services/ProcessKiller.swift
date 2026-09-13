@@ -1,4 +1,5 @@
 import Darwin
+import Foundation
 
 public struct KillTarget: Equatable, Sendable {
     public let port: UInt16
@@ -12,10 +13,10 @@ public struct KillTarget: Equatable, Sendable {
         self.identity = identity
     }
 
-    init(port: UInt16, pid: Int, processName: String) {
+    init(port: UInt16, pid: Int, processName: String, startTime: ProcessStartTime) {
         self.init(
             port: port,
-            identity: VerifiedProcessIdentity(pid: pid, processName: processName)!
+            identity: VerifiedProcessIdentity(pid: pid, processName: processName, startTime: startTime)!
         )
     }
 }
@@ -29,7 +30,11 @@ public enum KillError: Error, Equatable, CustomStringConvertible {
     case ambiguousListeners(port: UInt16, pids: [Int])
     case pidChanged(expected: Int, actual: Int)
     case processNameMismatch(expected: String, actual: String)
+    case processRestarted(pid: Int)
     case terminationFailed(String)
+    case portStillListening(port: UInt16)
+    case portReoccupied(port: UInt16, pid: Int)
+    case terminationUnconfirmed(String)
 
     public var description: String {
         switch self {
@@ -53,15 +58,23 @@ public enum KillError: Error, Equatable, CustomStringConvertible {
             return "PID changed from \(expected) to \(actual); refresh and try again"
         case .processNameMismatch(let expected, let actual):
             return "process changed from \(expected) to \(actual); refresh and try again"
+        case .processRestarted(let pid):
+            return "process start time changed for PID \(pid); refresh and try again"
         case .terminationFailed(let message):
             return "termination failed: \(message)"
+        case .portStillListening(let port):
+            return "종료 신호를 보냈지만 포트 \(port)가 아직 열려 있습니다. 강제 종료하지 않았습니다."
+        case .portReoccupied(let port, let pid):
+            return "포트 \(port)를 다른 실행(PID \(pid))이 점유하고 있습니다. 새 실행에는 종료 신호를 보내지 않았습니다."
+        case .terminationUnconfirmed(let message):
+            return "종료 신호를 보냈지만 포트 해제를 확인하지 못했습니다: \(message)"
         }
     }
 }
 
 public enum KillOutcome: Equatable, Sendable {
     case cancelled
-    case terminated
+    case signalSent
 }
 
 public protocol ProcessResolving: Sendable {
@@ -101,13 +114,50 @@ public protocol KillConfirming {
 public struct KillService: Sendable {
     private let resolver: ProcessResolving
     private let terminator: ProcessTerminating
+    private let connector: any SocketConnecting
 
     public init(
         resolver: ProcessResolving = ProcessLookup(),
-        terminator: ProcessTerminating = SystemProcessTerminator()
+        terminator: ProcessTerminating = SystemProcessTerminator(),
+        connector: any SocketConnecting = TCPPortConnector()
     ) {
         self.resolver = resolver
         self.terminator = terminator
+        self.connector = connector
+    }
+
+    public func terminateAndWaitForPortRelease(
+        target: KillTarget,
+        timeout: TimeInterval = 3,
+        pollInterval: TimeInterval = 0.2
+    ) async throws {
+        try Task.checkCancellation()
+        try terminateAfterRevalidation(target: target)
+        let deadline = ProcessInfo.processInfo.systemUptime + max(timeout, 0)
+        while true {
+            try Task.checkCancellation()
+            let observation = Result { try resolver.info(for: target.port) }
+            try Task.checkCancellation()
+            let incomplete: KillError
+            switch observation {
+            case .failure(let error):
+                incomplete = .terminationUnconfirmed(String(describing: error))
+            case .success(.some(let current)):
+                guard current.identity == target.identity else {
+                    throw KillError.portReoccupied(port: target.port, pid: current.pid)
+                }
+                incomplete = .portStillListening(port: target.port)
+            case .success(nil):
+                if !connector.isListeningOnLocalhost(port: target.port, timeout: 0.2) {
+                    try Task.checkCancellation()
+                    return
+                }
+                incomplete = .terminationUnconfirmed("포트 \(target.port)가 응답하지만 수신 프로세스를 확인할 수 없습니다.")
+            }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { throw incomplete }
+            try await Task.sleep(for: .seconds(min(max(pollInterval, 0.01), remaining)))
+        }
     }
 
     public func terminateAfterRevalidation(target: KillTarget) throws {
@@ -137,7 +187,11 @@ public struct KillService: Sendable {
                 actual: current.processName
             )
         }
+        guard current.identity.startTime == target.identity.startTime else {
+            throw KillError.processRestarted(pid: target.pid)
+        }
 
+        try Task.checkCancellation()
         if let message = terminator.terminate(pid: target.pid) {
             throw KillError.terminationFailed(message)
         }
@@ -157,6 +211,6 @@ public struct KillCoordinator {
         guard let target else { throw KillError.unsafeTarget }
         guard confirmer.confirmKill(target: target) else { return .cancelled }
         try service.terminateAfterRevalidation(target: target)
-        return .terminated
+        return .signalSent
     }
 }

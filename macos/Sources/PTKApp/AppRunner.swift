@@ -84,14 +84,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static var dockerPanelSnapshotScanner: PortScanner {
         PortScanner(
             connector: SnapshotSocketConnector(openPorts: [3000, 5173]),
-            lookup: ProcessLookup(runner: SnapshotProcessRunner())
+            lookup: ProcessLookup(
+                runner: SnapshotProcessRunner(),
+                startTime: { _ in ProcessStartTime(seconds: 1, microseconds: 0) }
+            )
         )
     }
 
     private static var densePanelSnapshotScanner: PortScanner {
         PortScanner(
             connector: SnapshotSocketConnector(openPorts: [3000, 3001, 3002, 3003]),
-            lookup: ProcessLookup(runner: SnapshotProcessRunner())
+            lookup: ProcessLookup(
+                runner: SnapshotProcessRunner(),
+                startTime: { _ in ProcessStartTime(seconds: 1, microseconds: 0) }
+            )
         )
     }
 

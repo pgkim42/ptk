@@ -170,13 +170,26 @@ A kill action is available only when all of these are true:
 
 1. The watched port is open.
 2. Exactly one listener PID is known.
-3. The process name is known.
+3. The process name and kernel-reported start time are known.
 4. The user confirms the native macOS confirmation alert.
-5. Right before termination, PTK re-checks the port, PID, and process name.
+5. Right before termination, PTK re-checks the port, PID, process name, and start time.
 
 If any of those checks fail, PTK blocks the kill. Ambiguous same-port listeners are left open but non-killable.
 
+Start time includes microseconds, so a reused PID with the same process name
+does not match the earlier execution. PTK also rejects metadata if the start
+time changes during name lookup or cannot be read. Revalidation and signal
+delivery are separate system operations; this does not make them atomic.
+
 PTK sends `SIGTERM` only. It does not provide force kill, mismatch override, or best-effort termination for ambiguous listeners.
+
+After sending the signal once, PTK keeps the action in progress while checking
+for port release. It checks for up to three seconds, allowing an in-flight
+bounded lookup to finish. A missing listener plus no localhost TCP response
+confirms port release; this does not claim that the entire process has exited.
+A remaining listener, a replacement execution, or a lookup failure is reported
+separately. PTK never automatically signals the replacement or escalates to
+`SIGKILL`. Stopping PTK cancels further observation.
 
 When a kill action is blocked, PTK explains the reason, such as ambiguous
 listeners, missing PID/process metadata, or a revalidation mismatch, and keeps

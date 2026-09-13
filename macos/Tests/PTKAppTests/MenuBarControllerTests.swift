@@ -49,7 +49,7 @@ import Testing
         #expect(controller.pendingGenerationForTesting == nil)
 
         let newestPortStatuses = [
-            PortStatus(port: 4000, isOpen: true, pid: 400, processName: "new")
+            PortStatus(port: 4000, isOpen: true, pid: 400, processName: "new", startTime: fixtureStartTime)
         ]
         let newestServiceStatuses = [
             ServiceStatus(name: "Newest", detail: "Current", state: .running)
@@ -84,6 +84,7 @@ import Testing
                     isOpen: true,
                     pid: 300,
                     processName: "stale",
+                    startTime: fixtureStartTime,
                     message: "stale port error"
                 )
             ]
@@ -208,7 +209,7 @@ import Testing
                     }
                 }
             )
-            controller.viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node"))
+            controller.viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node", startTime: fixtureStartTime))
             controller.viewModel.confirmKill()
 
             #expect(await eventually { !controller.viewModel.isTerminatingProcess })
@@ -217,6 +218,7 @@ import Testing
             #expect(refreshCalls.value == 1)
             #expect(controller.lastRefreshTriggerForTesting == .kill)
             #expect(controller.viewModel.killErrorMessage == failureMessage)
+            #expect(controller.viewModel.killStatusMessage == (failureMessage == nil ? "포트 3000 해제 확인" : nil))
         }
     }
 
@@ -237,16 +239,18 @@ import Testing
             controller.stop()
         }
 
-        controller.viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node"))
+        controller.viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node", startTime: fixtureStartTime))
         controller.viewModel.confirmKill()
         #expect(await eventually { killCalls.value == 1 && controller.viewModel.isTerminatingProcess })
+        #expect(controller.viewModel.killStatusMessage == "포트 3000 종료 처리 중…")
 
-        controller.viewModel.requestKill(KillTarget(port: 5173, pid: 200, processName: "vite"))
+        controller.viewModel.requestKill(KillTarget(port: 5173, pid: 200, processName: "vite", startTime: fixtureStartTime))
 
         #expect(controller.viewModel.killConfirmationTarget == nil)
         #expect(killCalls.value == 1)
         gate.open()
         #expect(await eventually { !controller.viewModel.isTerminatingProcess })
+        #expect(controller.viewModel.killStatusMessage == "포트 3000 해제 확인")
     }
 
     @Test func cancellingConfirmationDoesNotInvokeProductionKillWorker() {
@@ -259,12 +263,43 @@ import Testing
         )
         defer { controller.stop() }
 
-        controller.viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node"))
+        controller.viewModel.requestKill(KillTarget(port: 3000, pid: 100, processName: "node", startTime: fixtureStartTime))
         controller.viewModel.cancelKill()
 
         #expect(controller.viewModel.killConfirmationTarget == nil)
         #expect(!controller.viewModel.isTerminatingProcess)
         #expect(killCalls.value == 0)
+    }
+
+    @Test func stoppingDuringObservationCancelsWorkerAndClearsStatus() async {
+        let started = LockedBox(false)
+        let cancelled = LockedBox(false)
+        let controller = MenuBarController(
+            settings: AppSettings(store: InMemorySettingsStore()),
+            portScanWorker: { _ in [] },
+            serviceSnapshotWorker: { _ in ServiceSnapshot(statuses: []) },
+            killWorker: { _ in
+                started.withValue { $0 = true }
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    cancelled.withValue { $0 = true }
+                    throw error
+                }
+            }
+        )
+        defer { controller.stop() }
+        controller.viewModel.requestKill(KillTarget(
+            port: 3000, pid: 100, processName: "node", startTime: fixtureStartTime
+        ))
+        controller.viewModel.confirmKill()
+        #expect(await eventually { started.value })
+        controller.stop()
+        #expect(await eventually { cancelled.value })
+        #expect(!controller.viewModel.isTerminatingProcess)
+        #expect(controller.viewModel.killStatusMessage == nil)
+        #expect(controller.viewModel.killErrorMessage == nil)
+        #expect(controller.lastRefreshTriggerForTesting != .kill)
     }
 
     @Test func settingsDraftChangesAreDiscardedWithoutSave() throws {
@@ -406,7 +441,7 @@ import Testing
             onCopyText: { copied.append($0) },
             copyFeedbackDurationNanoseconds: 20_000_000
         )
-        let status = PortStatus(port: 3000, isOpen: true, pid: 42, processName: "node")
+        let status = PortStatus(port: 3000, isOpen: true, pid: 42, processName: "node", startTime: fixtureStartTime)
         let dockerRow = DockerContainerPortRow(
             id: "api",
             name: "api",
@@ -506,3 +541,5 @@ private struct TestFailure: Error, CustomStringConvertible, Sendable {
         self.description = description
     }
 }
+
+private let fixtureStartTime = ProcessStartTime(seconds: 1, microseconds: 0)

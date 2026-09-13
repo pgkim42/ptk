@@ -49,6 +49,134 @@ private struct FakeConfirmer: KillConfirming {
 }
 
 @Suite struct KillSafetyTests {
+    @Test func waitsForPortReleaseWithoutResendingSignal() async throws {
+        let info = PortProcessInfo(port: 3000, pid: 111, processName: "node", startTime: fixtureStartTime)
+        let resolver = ScriptedResolver([.success(info), .success(info), .success(nil)])
+        let terminator = FakeTerminator()
+        let service = KillService(
+            resolver: resolver, terminator: terminator,
+            connector: FakeSocketConnector(openPorts: [])
+        )
+        try await service.terminateAndWaitForPortRelease(
+            target: target(pid: 111, name: "node"), pollInterval: 0.01
+        )
+        #expect(resolver.calls == 3)
+        #expect(terminator.terminatedPIDs == [111])
+    }
+
+    @Test func signalAcceptedButListenerRemainsIsNotSuccess() async {
+        let terminator = FakeTerminator()
+        let service = KillService(
+            resolver: FakeResolver(info: PortProcessInfo(
+                port: 3000, pid: 111, processName: "node", startTime: fixtureStartTime
+            )),
+            terminator: terminator
+        )
+        await #expect(throws: KillError.portStillListening(port: 3000)) {
+            try await service.terminateAndWaitForPortRelease(target: target(pid: 111, name: "node"), timeout: 0)
+        }
+        #expect(terminator.terminatedPIDs == [111])
+    }
+
+    @Test func replacementOnSamePortIsNotTerminated() async {
+        let old = PortProcessInfo(port: 3000, pid: 111, processName: "node", startTime: fixtureStartTime)
+        let new = PortProcessInfo(
+            port: 3000, pid: 111, processName: "node",
+            startTime: ProcessStartTime(seconds: 2, microseconds: 0)
+        )
+        let terminator = FakeTerminator()
+        let service = KillService(resolver: ScriptedResolver([.success(old), .success(new)]), terminator: terminator)
+        await #expect(throws: KillError.portReoccupied(port: 3000, pid: 111)) {
+            try await service.terminateAndWaitForPortRelease(target: target(pid: 111, name: "node"))
+        }
+        #expect(terminator.terminatedPIDs == [111])
+    }
+
+    @Test func postSignalLookupFailureIsUnconfirmed() async {
+        let info = PortProcessInfo(port: 3000, pid: 111, processName: "node", startTime: fixtureStartTime)
+        let terminator = FakeTerminator()
+        let service = KillService(
+            resolver: ScriptedResolver([.success(info), .failure(.lsofFailed("denied"))]),
+            terminator: terminator
+        )
+        await #expect(throws: KillError.terminationUnconfirmed("denied")) {
+            try await service.terminateAndWaitForPortRelease(target: target(pid: 111, name: "node"), timeout: 0)
+        }
+        #expect(terminator.terminatedPIDs == [111])
+    }
+
+    @Test func missingListenerMetadataWithRespondingSocketIsUnconfirmed() async {
+        let info = PortProcessInfo(port: 3000, pid: 111, processName: "node", startTime: fixtureStartTime)
+        let service = KillService(
+            resolver: ScriptedResolver([.success(info), .success(nil)]),
+            terminator: FakeTerminator(), connector: FakeSocketConnector(openPorts: [3000])
+        )
+        await #expect(throws: KillError.terminationUnconfirmed("포트 3000가 응답하지만 수신 프로세스를 확인할 수 없습니다.")) {
+            try await service.terminateAndWaitForPortRelease(target: target(pid: 111, name: "node"), timeout: 0)
+        }
+    }
+
+    @Test func transientObservationFailureCanRecoverWithoutAnotherSignal() async throws {
+        let info = PortProcessInfo(port: 3000, pid: 111, processName: "node", startTime: fixtureStartTime)
+        let terminator = FakeTerminator()
+        let service = KillService(
+            resolver: ScriptedResolver([.success(info), .failure(.lsofFailed("timeout")), .success(nil)]),
+            terminator: terminator, connector: FakeSocketConnector(openPorts: [])
+        )
+        try await service.terminateAndWaitForPortRelease(target: target(pid: 111, name: "node"), pollInterval: 0.01)
+        #expect(terminator.terminatedPIDs == [111])
+    }
+
+    @Test func cancellationDuringObservationStopsWithoutAnotherSignal() async throws {
+        let info = PortProcessInfo(port: 3000, pid: 111, processName: "node", startTime: fixtureStartTime)
+        let resolver = ScriptedResolver([.success(info)])
+        let terminator = FakeTerminator()
+        let service = KillService(resolver: resolver, terminator: terminator)
+        let task = Task {
+            try await service.terminateAndWaitForPortRelease(target: target(pid: 111, name: "node"), pollInterval: 1)
+        }
+        defer { task.cancel() }
+        for _ in 0..<100 where resolver.calls < 2 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(resolver.calls == 2)
+        task.cancel()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(terminator.terminatedPIDs == [111])
+    }
+
+    @Test(arguments: [
+        ProcessLookupError.processStartTimeUnavailable(pid: 111),
+        ProcessLookupError.processChangedDuringLookup(pid: 111)
+    ])
+    func uncertainStartTimeBlocksTermination(error: ProcessLookupError) {
+        let terminator = FakeTerminator()
+        let service = KillService(
+            resolver: FakeResolver(info: nil, error: error),
+            terminator: terminator
+        )
+        #expect(throws: KillError.resolverFailed(error.description)) {
+            try service.terminateAfterRevalidation(target: target(pid: 111, name: "node"))
+        }
+        #expect(terminator.terminatedPIDs.isEmpty)
+    }
+
+    @Test func reusedPIDWithSameNameBlocksTermination() {
+        let terminator = FakeTerminator()
+        let service = KillService(
+            resolver: FakeResolver(info: PortProcessInfo(
+                port: 3000, pid: 111, processName: "node",
+                startTime: ProcessStartTime(seconds: 1, microseconds: 1)
+            )),
+            terminator: terminator
+        )
+
+        #expect(throws: KillError.processRestarted(pid: 111)) {
+            try service.terminateAfterRevalidation(target: target(pid: 111, name: "node"))
+        }
+        #expect(terminator.terminatedPIDs.isEmpty)
+    }
+
     @Test func missingTargetCannotBeKilled() {
         let terminator = FakeTerminator()
         let coordinator = KillCoordinator(
@@ -80,14 +208,14 @@ private struct FakeConfirmer: KillConfirming {
         let coordinator = KillCoordinator(
             confirmer: FakeConfirmer(confirmed: true),
             service: KillService(
-                resolver: ProcessLookup(runner: runner),
+                resolver: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime }),
                 terminator: terminator
             )
         )
 
         let outcome = try coordinator.requestKill(target: target(pid: 111, name: "node"))
 
-        #expect(outcome == .terminated)
+        #expect(outcome == .signalSent)
         #expect(runner.calls.map(\.0) == ["lsof", "ps"])
         #expect(terminator.terminatedPIDs == [111])
     }
@@ -107,7 +235,7 @@ private struct FakeConfirmer: KillConfirming {
         let coordinator = KillCoordinator(
             confirmer: FakeConfirmer(confirmed: false),
             service: KillService(
-                resolver: ProcessLookup(runner: runner),
+                resolver: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime }),
                 terminator: terminator
             )
         )
@@ -129,7 +257,7 @@ private struct FakeConfirmer: KillConfirming {
         )
         let terminator = FakeTerminator()
         let service = KillService(
-            resolver: ProcessLookup(runner: runner),
+            resolver: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime }),
             terminator: terminator
         )
 
@@ -166,7 +294,7 @@ private struct FakeConfirmer: KillConfirming {
         )
         let terminator = FakeTerminator()
         let service = KillService(
-            resolver: ProcessLookup(runner: runner),
+            resolver: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime }),
             terminator: terminator
         )
 
@@ -186,7 +314,7 @@ private struct FakeConfirmer: KillConfirming {
         )
         let terminator = FakeTerminator()
         let service = KillService(
-            resolver: ProcessLookup(runner: runner),
+            resolver: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime }),
             terminator: terminator
         )
 
@@ -205,7 +333,7 @@ private struct FakeConfirmer: KillConfirming {
         )
         let terminator = FakeTerminator()
         let service = KillService(
-            resolver: ProcessLookup(runner: runner),
+            resolver: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime }),
             terminator: terminator
         )
 
@@ -219,7 +347,7 @@ private struct FakeConfirmer: KillConfirming {
         let runner = configuredRunner(listenerLines: [], processNames: [:])
         let terminator = FakeTerminator()
         let service = KillService(
-            resolver: ProcessLookup(runner: runner),
+            resolver: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime }),
             terminator: terminator
         )
 
@@ -238,7 +366,7 @@ private struct FakeConfirmer: KillConfirming {
         )
         let terminator = FakeTerminator()
         let service = KillService(
-            resolver: ProcessLookup(runner: runner),
+            resolver: ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime }),
             terminator: terminator
         )
 
@@ -253,7 +381,7 @@ private struct FakeConfirmer: KillConfirming {
         terminator.failureMessage = "operation not permitted"
         let service = KillService(
             resolver: FakeResolver(
-                info: PortProcessInfo(port: 3000, pid: 111, processName: "node")
+                info: PortProcessInfo(port: 3000, pid: 111, processName: "node", startTime: fixtureStartTime)
             ),
             terminator: terminator
         )
@@ -280,8 +408,28 @@ private struct FakeConfirmer: KillConfirming {
 
 }
 
+private final class ScriptedResolver: ProcessResolving, @unchecked Sendable {
+    private let lock = NSLock()
+    private var responses: [Result<PortProcessInfo?, ProcessLookupError>]
+    private var count = 0
+
+    init(_ responses: [Result<PortProcessInfo?, ProcessLookupError>]) {
+        self.responses = responses
+    }
+
+    var calls: Int { lock.withLock { count } }
+
+    func info(for port: UInt16) throws -> PortProcessInfo? {
+        try lock.withLock {
+            count += 1
+            let response = responses.count > 1 ? responses.removeFirst() : responses[0]
+            return try response.get()
+        }
+    }
+}
+
 private func target(pid: Int, name: String) -> KillTarget {
-    KillTarget(port: 3000, pid: pid, processName: name)
+    KillTarget(port: 3000, pid: pid, processName: name, startTime: fixtureStartTime)
 }
 
 private func configuredRunner(
@@ -348,3 +496,5 @@ private final class SignalRecorder: @unchecked Sendable {
         return 0
     }
 }
+
+private let fixtureStartTime = ProcessStartTime(seconds: 1, microseconds: 0)

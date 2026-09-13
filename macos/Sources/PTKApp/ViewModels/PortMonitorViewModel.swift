@@ -242,6 +242,7 @@ final class PortMonitorViewModel: ObservableObject {
 
     @Published var killConfirmationTarget: KillTarget?
     @Published var killErrorMessage: String?
+    @Published var killStatusMessage: String?
     @Published var isShowingSettings = false {
         didSet {
             guard isShowingSettings, !oldValue else { return }
@@ -415,6 +416,7 @@ final class PortMonitorViewModel: ObservableObject {
         guard !isTerminatingProcess else { return }
         killConfirmationTarget = target
         killErrorMessage = nil
+        killStatusMessage = nil
     }
 
     func confirmKill() {
@@ -424,6 +426,7 @@ final class PortMonitorViewModel: ObservableObject {
         killConfirmationTarget = nil
         killErrorMessage = nil
         isTerminatingProcess = true
+        killStatusMessage = "포트 \(target.port) 종료 처리 중…"
 
         Task { [weak self] in
             guard let self else { return }
@@ -434,9 +437,11 @@ final class PortMonitorViewModel: ObservableObject {
             switch result {
             case .settled(let errorMessage):
                 self.killErrorMessage = errorMessage
+                self.killStatusMessage = errorMessage == nil ? "포트 \(target.port) 해제 확인" : nil
                 self.onKillSettled()
             case .invalidated:
                 self.killErrorMessage = nil
+                self.killStatusMessage = nil
             }
         }
     }
@@ -450,6 +455,7 @@ final class PortMonitorViewModel: ObservableObject {
         killConfirmationTarget = nil
         isRefreshing = false
         isTerminatingProcess = false
+        killStatusMessage = nil
     }
 
     func saveExpression(_ expression: String) throws {

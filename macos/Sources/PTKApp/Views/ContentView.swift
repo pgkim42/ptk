@@ -42,7 +42,7 @@ struct ContentView: View {
             Text(verbatim: "Port \(target.port), PID \(target.pid), \(target.processName)를 종료합니다.")
         }
         .alert(
-            "종료 실패",
+            "종료 결과 확인",
             isPresented: .init(
                 get: { viewModel.killErrorMessage != nil },
                 set: { if !$0 { viewModel.killErrorMessage = nil } }
@@ -64,6 +64,18 @@ struct ContentView: View {
             PTKHairline()
 
             VStack(alignment: .leading, spacing: PTKSpace.sm) {
+                if let message = viewModel.killStatusMessage {
+                    HStack(spacing: PTKSpace.sm) {
+                        if viewModel.isTerminatingProcess {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "checkmark.circle")
+                        }
+                        Text(message).font(PTKType.ui(12))
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+
                 if let errorMessage = viewModel.errorMessage {
                     ErrorBannerView(message: errorMessage)
                 }

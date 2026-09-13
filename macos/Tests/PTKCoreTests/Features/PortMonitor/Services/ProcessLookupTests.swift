@@ -3,6 +3,31 @@ import Foundation
 @testable import PTKCore
 
 @Suite struct ProcessLookupTests {
+    @Test(arguments: [false, true])
+    func unavailableStartTimeRejectsIdentity(afterNameLookup: Bool) {
+        let runner = FakeProcessRunner()
+        runner.results["ps -p 111 -o comm="] = ProcessRunResult(exitCode: 0, stdout: "node")
+        let lookup = ProcessLookup(runner: runner, startTime: { _ in
+            afterNameLookup && runner.calls.isEmpty
+                ? fixtureStartTime : nil
+        })
+        #expect(throws: ProcessLookupError.processStartTimeUnavailable(pid: 111)) {
+            try lookup.info(for: 3000, using: singleListenerSnapshot)
+        }
+        #expect(runner.calls.count == (afterNameLookup ? 1 : 0))
+    }
+
+    @Test func processRestartDuringNameLookupRejectsMixedIdentity() {
+        let runner = FakeProcessRunner()
+        runner.results["ps -p 111 -o comm="] = ProcessRunResult(exitCode: 0, stdout: "node")
+        let lookup = ProcessLookup(runner: runner, startTime: { _ in
+            ProcessStartTime(seconds: 1, microseconds: runner.calls.isEmpty ? 0 : 1)
+        })
+        #expect(throws: ProcessLookupError.processChangedDuringLookup(pid: 111)) {
+            try lookup.info(for: 3000, using: singleListenerSnapshot)
+        }
+    }
+
     @Test func infoRunsOneLsofThenResolvesVerifiedIdentity() throws {
         let runner = FakeProcessRunner()
         runner.results["lsof -nP -iTCP -sTCP:LISTEN"] = ProcessRunResult(
@@ -17,7 +42,7 @@ import Foundation
             stdout: " node \n"
         )
 
-        let info = try ProcessLookup(runner: runner).info(for: 3000)
+        let info = try ProcessLookup(runner: runner, startTime: { _ in fixtureStartTime }).info(for: 3000)
 
         #expect(info?.pid == 111)
         #expect(info?.processName == "node")
@@ -176,6 +201,13 @@ import Foundation
 
 }
 
+private let singleListenerSnapshot = LsofParser().parse(
+    """
+    COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+    node 111 me 1u IPv4 0x1 0t0 TCP 127.0.0.1:3000 (LISTEN)
+    """
+)
+
 private struct TimeoutProcessCall: Equatable {
     let executable: String
     let arguments: [String]
@@ -221,3 +253,5 @@ private final class TimeoutRecordingProcessRunner: ProcessRunning, @unchecked Se
         }
     }
 }
+
+private let fixtureStartTime = ProcessStartTime(seconds: 1, microseconds: 0)

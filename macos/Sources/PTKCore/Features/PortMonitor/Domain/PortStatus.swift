@@ -3,13 +3,15 @@ import Foundation
 public struct VerifiedProcessIdentity: Equatable, Sendable {
     public let pid: Int
     public let processName: String
+    public let startTime: ProcessStartTime
 
-    init?(pid: Int, processName: String) {
+    init?(pid: Int, processName: String, startTime: ProcessStartTime) {
         let trimmedProcessName = processName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard pid > 0, !trimmedProcessName.isEmpty else { return nil }
 
         self.pid = pid
         self.processName = trimmedProcessName
+        self.startTime = startTime
     }
 }
 
@@ -59,7 +61,7 @@ public struct PortStatus: Equatable, Sendable {
 
     public var killTarget: KillTarget? {
         guard let identity = verifiedIdentity else { return nil }
-        return KillTarget(port: port, pid: identity.pid, processName: identity.processName)
+        return KillTarget(port: port, identity: identity)
     }
 
     public init(
@@ -79,6 +81,7 @@ public struct PortStatus: Equatable, Sendable {
         isOpen: Bool,
         pid: Int? = nil,
         processName: String? = nil,
+        startTime: ProcessStartTime? = nil,
         message: String? = nil
     ) {
         let identityState: PortIdentityState?
@@ -86,7 +89,8 @@ public struct PortStatus: Equatable, Sendable {
             identityState = nil
         } else if let pid,
                   let processName,
-                  let identity = VerifiedProcessIdentity(pid: pid, processName: processName) {
+                  let startTime,
+                  let identity = VerifiedProcessIdentity(pid: pid, processName: processName, startTime: startTime) {
             identityState = .verified(identity)
         } else {
             identityState = .unavailable(Self.unavailableCause(
