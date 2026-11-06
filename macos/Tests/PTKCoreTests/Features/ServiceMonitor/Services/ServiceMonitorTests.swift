@@ -30,6 +30,22 @@ import Testing
         #expect(monitor.dockerStatus() == ServiceStatus(name: "Docker", detail: "Daemon", state: .stopped))
     }
 
+    @Test func missingDaemonSocketDoesNotMeanDockerCommandIsMissing() {
+        let runner = FakeServiceCommandRunner(results: [
+            "docker info": ServiceCommandResult(
+                exitCode: 1,
+                stdout: "",
+                stderr: "dial unix /tmp/docker.sock: connect: no such file or directory"
+            )
+        ])
+        let monitor = ServiceMonitor(runner: runner, connector: FakeServiceSocketChecker(openPorts: []))
+
+        let snapshot = monitor.scanWithDetails()
+
+        #expect(snapshot.statuses.first?.state == .stopped)
+        #expect(snapshot.dockerContainerRows.isEmpty)
+    }
+
     @Test func dockerHelperLifecycleFailuresAreCommandUnavailable() {
         let errors: [ServiceCommandError] = [
             .launchFailed("launch failed"),
@@ -184,6 +200,32 @@ import Testing
             state: .running
         ))
         #expect(snapshot.dockerContainerRows.isEmpty)
+    }
+
+    @Test func dockerDetailsErrorsPreserveConfirmedDaemonAndDatabaseStates() {
+        let errors: [ServiceCommandError] = [
+            .timedOut,
+            .launchFailed("launch failed"),
+            .outputLimitExceeded(streams: [.stdout]),
+            .pipeDrainTimedOut
+        ]
+        for error in errors {
+            let runner = FakeServiceCommandRunner(
+                results: ["docker info": ServiceCommandResult(exitCode: 0, stdout: "")],
+                errors: ["docker ps --format {{.Names}}\t{{.Ports}}": error]
+            )
+            let monitor = ServiceMonitor(
+                runner: runner,
+                connector: FakeServiceSocketChecker(openPorts: [5432]),
+                databaseEndpoints: [DatabaseEndpoint(name: "PostgreSQL", port: 5432)]
+            )
+
+            let snapshot = monitor.scanWithDetails()
+
+            #expect(snapshot.statuses.first?.state == .running)
+            #expect(snapshot.statuses.last?.state == .running)
+            #expect(snapshot.dockerContainerRows.isEmpty)
+        }
     }
 
     @Test func databaseStatusesReflectKnownPorts() {

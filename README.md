@@ -145,6 +145,11 @@ manage Docker containers or database services. Additional read-only service port
 checks can be saved in settings for tools such as RabbitMQ, Elasticsearch,
 MinIO, or LocalStack.
 
+Docker command availability and daemon state are checked separately: an absent
+daemon socket means stopped, while a missing Docker executable means unavailable.
+After `docker info` confirms the daemon is running, a container-details timeout
+or helper failure keeps that running state and reports the details error.
+
 When Docker is running, PTK also shows child rows under the Docker service row
 for running containers with host-published ports. The display is always
 `bind:host -> container/protocol`, such as `*:3000 -> 80/tcp` or

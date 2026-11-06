@@ -501,11 +501,11 @@ public struct ServiceMonitor: Sendable {
             do {
                 dockerContainerRows = try collectDockerContainerRows()
             } catch ServiceCommandError.timedOut {
-                docker = ServiceStatus(name: "Docker", detail: "Details timeout", state: .unavailable, kind: .dockerDaemon)
+                docker = ServiceStatus(name: "Docker", detail: "Daemon; details timeout", state: .running, kind: .dockerDaemon)
             } catch ServiceCommandError.commandFailed(let exitCode) {
                 docker = ServiceStatus(name: "Docker", detail: "Daemon; details failed (\(exitCode))", state: .running, kind: .dockerDaemon)
             } catch {
-                docker = ServiceStatus(name: "Docker", detail: "Details unavailable", state: .unavailable, kind: .dockerDaemon)
+                docker = ServiceStatus(name: "Docker", detail: "Daemon; details unavailable", state: .running, kind: .dockerDaemon)
             }
         }
 
@@ -529,7 +529,7 @@ public struct ServiceMonitor: Sendable {
         if result.succeeded {
             return ServiceStatus(name: "Docker", detail: "Daemon", state: .running, kind: .dockerDaemon)
         }
-        if result.exitCode == 127 || result.stderr.localizedCaseInsensitiveContains("no such file") {
+        if result.exitCode == 127 {
             return ServiceStatus(name: "Docker", detail: "Command unavailable", state: .unavailable, kind: .dockerDaemon)
         }
         return ServiceStatus(name: "Docker", detail: "Daemon", state: .stopped, kind: .dockerDaemon)

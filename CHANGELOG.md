@@ -36,6 +36,9 @@ This line is not released yet. PTK has no published binary artifacts.
   blocking, and `SIGTERM`-only termination policy.
 - Preserve Docker bind addresses and protocols, restrict localhost copy actions
   to reachable TCP mappings, and surface `docker ps` failures.
+- Distinguish a missing Docker daemon socket from a missing Docker executable.
+  Preserve a confirmed running daemon state when container-detail collection
+  times out or its helper fails, while keeping the detail error visible.
 - Make dense panel content scrollable, keep notification permission state fresh
   while notifications are off, and prevent duplicate kill confirmations.
 - Build universal Apple Silicon and Intel release artifacts and compare the
